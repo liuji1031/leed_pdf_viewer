@@ -43,6 +43,7 @@
 	import ArrowOverlay from './ArrowOverlay.svelte';
 	import ImageOverlay from './ImageOverlay.svelte';
 	import LinkOverlay from './LinkOverlay.svelte';
+	import PDFTextLayer from './PDFTextLayer.svelte';
 	import TextSelectionOverlay from './TextSelectionOverlay.svelte';
 	import { TOOLBAR_HEIGHT } from '$lib/constants';
 	import { setWindowTitle } from '$lib/utils/tauriUtils';
@@ -3315,6 +3316,16 @@
 					containerWidth={canvasDisplayWidth}
 					containerHeight={canvasDisplayHeight}
 					onGoToPage={goToPage}
+				/>
+			{/if}
+
+			<!-- Selectable text layer — only in the DOM while the ask tool is active -->
+			{#if $drawingState.tool === 'ask' && $pdfState.document && canvasDisplayWidth > 0}
+				<PDFTextLayer
+					pdfDocument={$pdfState.document}
+					pageNumber={$pdfState.currentPage}
+					scale={$pdfState.scale}
+					rotation={$pdfState.rotation as RotationAngle}
 				/>
 			{/if}
 		</div>
