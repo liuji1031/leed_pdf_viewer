@@ -129,6 +129,10 @@ export function keyboardShortcuts(node: Window | HTMLElement, params: KeyboardSh
 					event.preventDefault();
 					setTool('select');
 					break;
+				case '8':
+					event.preventDefault();
+					setTool('ask');
+					break;
 				case 'h':
 				case 'H':
 					event.preventDefault();

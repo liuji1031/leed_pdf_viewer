@@ -2,7 +2,18 @@ import { derived, writable } from 'svelte/store';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { DEFAULT_TEXT_FONT, BUNDLED_FONTS, getAllAvailableFonts, type FontOption } from '../config/fonts';
 
-export type DrawingTool = 'pencil' | 'eraser' | 'text' | 'arrow' | 'highlight' | 'note' | 'stamp' | 'select';
+export type DrawingTool =
+	| 'pencil'
+	| 'eraser'
+	| 'text'
+	| 'arrow'
+	| 'highlight'
+	| 'note'
+	| 'stamp'
+	| 'select'
+	// Select text on the page to ask the chat assistant about it. Never creates a
+	// DrawingPath, so it is deliberately absent from lpdfExport's isDrawingTool.
+	| 'ask';
 
 export interface DrawingState {
 	tool: DrawingTool;

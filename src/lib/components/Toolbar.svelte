@@ -47,6 +47,7 @@
 		Image,
 		Layout,
 		Maximize2,
+		MessageSquareQuote,
 		Minimize2,
 		Moon,
 		MoreHorizontal,
@@ -614,6 +615,17 @@
 						aria-label="Select text tool"
 					>
 						<MousePointerClick size={14} />
+					</button>
+				</Tooltip>
+
+				<Tooltip content="Ask about selected text (8)">
+					<button
+						class="tool-button w-8 h-8 flex items-center justify-center"
+						class:active={$drawingState.tool === 'ask'}
+						on:click={() => handleToolChange('ask')}
+						aria-label="Ask about text tool"
+					>
+						<MessageSquareQuote size={14} />
 					</button>
 				</Tooltip>
 
@@ -1488,6 +1500,15 @@
 				aria-label="Select text tool"
 			>
 				<MousePointerClick size={16} />
+			</button>
+
+			<button
+				class="tool-button flex items-center justify-center"
+				class:active={$drawingState.tool === 'ask'}
+				on:click={() => handleToolChange('ask')}
+				aria-label="Ask about text tool"
+			>
+				<MessageSquareQuote size={16} />
 			</button>
 
 			<div class="h-6 w-px bg-charcoal/20"></div>
