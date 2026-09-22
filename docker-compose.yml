@@ -1,0 +1,88 @@
+name: leedpdf
+
+# PUBLIC_* are consumed by SvelteKit's $env/static/public, which is INLINED AT
+# BUILD TIME. They are build args for the production image and plain env for
+# dev/test (where `svelte-kit sync` generates the module's types from them).
+# Empty defaults keep `pnpm check` passing without a .env file.
+x-public-env: &public-env
+  PUBLIC_POSTHOG_KEY: ${PUBLIC_POSTHOG_KEY:-}
+  PUBLIC_APPWRITE_ENDPOINT: ${PUBLIC_APPWRITE_ENDPOINT:-}
+  PUBLIC_APPWRITE_PROJECT_ID: ${PUBLIC_APPWRITE_PROJECT_ID:-}
+  PUBLIC_APPWRITE_DATABASE_ID: ${PUBLIC_APPWRITE_DATABASE_ID:-}
+  PUBLIC_APPWRITE_STORAGE_BUCKET_ID: ${PUBLIC_APPWRITE_STORAGE_BUCKET_ID:-}
+  PUBLIC_APPWRITE_SHARED_PDFS_COLLECTION_ID: ${PUBLIC_APPWRITE_SHARED_PDFS_COLLECTION_ID:-}
+  PUBLIC_APPWRITE_PDF_ANNOTATIONS_COLLECTION_ID: ${PUBLIC_APPWRITE_PDF_ANNOTATIONS_COLLECTION_ID:-}
+
+# Source bind-mount plus an anonymous volume that shadows node_modules, so the
+# image's installed dependencies survive the mount instead of being hidden by
+# the (absent) host node_modules.
+x-source-mount: &source-mount
+  - .:/app
+  - /app/node_modules
+  - /app/.svelte-kit
+
+services:
+  # ---------------------------------------------------------------------
+  # Vite dev server with HMR.  http://localhost:5173
+  # ---------------------------------------------------------------------
+  dev:
+    profiles: [dev]
+    build:
+      context: .
+      target: dev
+    environment:
+      <<: *public-env
+      # Host-side address the browser connects back to for HMR. Must be the
+      # host's value, not the container's, or the websocket never connects.
+      VITE_HMR_HOST: ${VITE_HMR_HOST:-localhost}
+      VITE_HMR_PORT: ${VITE_HMR_PORT:-5173}
+      VITE_DEV_MODE: "true"
+    volumes: *source-mount
+    ports:
+      - "${DEV_PORT:-5173}:5173"
+
+  # ---------------------------------------------------------------------
+  # Unit tests (vitest + jsdom).
+  #   docker compose --profile test run --rm unit
+  # Extra args pass through:  ... run --rm unit pnpm test:run textAnchor
+  # ---------------------------------------------------------------------
+  unit:
+    profiles: [test]
+    build:
+      context: .
+      target: test
+    environment: *public-env
+    volumes: *source-mount
+
+  # ---------------------------------------------------------------------
+  # Type checking — same image as unit, different command.
+  #   docker compose --profile test run --rm typecheck
+  # ---------------------------------------------------------------------
+  typecheck:
+    profiles: [test]
+    build:
+      context: .
+      target: test
+    environment: *public-env
+    volumes: *source-mount
+    command: ["pnpm", "check"]
+
+  # ---------------------------------------------------------------------
+  # Playwright e2e. The image tag must track @playwright/test in package.json
+  # or the bundled browsers mismatch the client and Playwright refuses to run.
+  #
+  # playwright.config.ts already starts its own server via `webServer`
+  # (build + preview on 4173), so this service is self-contained and does not
+  # depend on `dev`.
+  # ---------------------------------------------------------------------
+  e2e:
+    profiles: [test]
+    image: mcr.microsoft.com/playwright:v1.60.0-noble
+    working_dir: /app
+    environment:
+      <<: *public-env
+      CI: "true"
+    volumes: *source-mount
+    # Chromium's sandbox needs more than the default 64MB of shared memory.
+    shm_size: 1gb
+    command: ["sh", "-c", "corepack enable && pnpm exec playwright test"]

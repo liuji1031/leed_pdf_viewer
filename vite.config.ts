@@ -17,6 +17,9 @@ export default defineConfig({
 		format: 'es'
 	},
 	server: {
+		// Bind all interfaces so the dev server is reachable when it runs inside
+		// a container. Harmless outside one — Vite still serves on localhost.
+		host: true,
 		fs: {
 			allow: ['..', 'node_modules/pdfjs-dist']
 		},
@@ -24,8 +27,10 @@ export default defineConfig({
 			'Cache-Control': 'public, max-age=31536000',
 		},
 		hmr: {
-			port: 5173,
-			host: 'localhost'
+			// The HMR websocket address is resolved by the *browser*, so in a
+			// container it must be the host's address, not the container's.
+			port: Number(process.env.VITE_HMR_PORT ?? 5173),
+			host: process.env.VITE_HMR_HOST ?? 'localhost'
 		}
 	},
 	build: {

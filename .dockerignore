@@ -1,0 +1,30 @@
+# Build outputs and dependencies — always reinstalled inside the image
+node_modules
+.svelte-kit
+.vercel
+build
+dist
+
+# Rust build artifacts: multi-GB, never needed for the web app or tests
+src-tauri/target
+
+# Test artifacts
+playwright-report
+test-results
+coverage
+
+# VCS and editor
+.git
+.github
+.vscode
+.idea
+
+# Local env — passed explicitly as build args / env, never baked in
+.env
+.env.*
+!.env.example
+
+# Docs and signing material
+*.md
+!README.md
+AppleWWDRCA.cer
