@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import { type Toast, toastStore } from '$lib/stores/toastStore';
 	import { AlertTriangle, CheckCircle, Info, Lightbulb, X, XCircle } from 'lucide-svelte';
@@ -36,12 +35,10 @@
     toastStore.removeToast(toast.id);
   }
 
-  onMount(() => {
-    // Focus for accessibility
-    if (toastElement) {
-      toastElement.focus();
-    }
-  });
+  // No focus() on mount. role="alert" with aria-live already makes screen
+  // readers announce the toast; moving focus on a notification pulls users out
+  // of what they were doing, and in Firefox/WebKit it also moves the document
+  // selection into the toast — hijacking a text selection that's in progress.
 </script>
 
 <div
