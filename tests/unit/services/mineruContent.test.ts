@@ -100,6 +100,19 @@ describe('structuredContentToDocument — two-column paper', () => {
 describe('structuredContentToDocument — edge cases', () => {
 	const page = (blocks: unknown[]) => ({ pages: [{ page_idx: 0, blocks }] });
 
+	it('demotes flash-tier "headings" that are really equations or email addresses', () => {
+		const doc = structuredContentToDocument(
+			page([
+				{ type: 'paragraph_title', level: 2, content: '3.2.2 Multi-Head Attention' },
+				{ type: 'paragraph_title', level: 2, content: 'MultiHead(Q, K, V) = Concat(head<sub>1</sub>, ..., head<sub>h</sub>)W<sup>O</sup>' },
+				{ type: 'paragraph_title', level: 2, content: 'illia.polosukhin@gmail.com' }
+			]),
+			'k'
+		);
+		expect(doc.blocks.map((b) => b.type)).toEqual(['heading', 'equation', 'text']);
+		expect(doc.outline.map((o) => o.text)).toEqual(['3.2.2 Multi-Head Attention']);
+	});
+
 	it('drops page furniture but keeps footnotes', () => {
 		const doc = structuredContentToDocument(
 			page([

@@ -46,6 +46,8 @@
 	import PDFTextLayer from './PDFTextLayer.svelte';
 	import AskSelectionChip from './AskSelectionChip.svelte';
 	import ChatHighlightOverlay from './ChatHighlightOverlay.svelte';
+	// Parses each opened document in the background for the chat assistant.
+	import '$lib/services/documentParsing';
 	import TextSelectionOverlay from './TextSelectionOverlay.svelte';
 	import { TOOLBAR_HEIGHT } from '$lib/constants';
 	import { setWindowTitle } from '$lib/utils/tauriUtils';

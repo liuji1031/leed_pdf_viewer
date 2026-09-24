@@ -8,8 +8,59 @@
  * garbage-collected on a timer; transcripts must never be.
  */
 
+import type { ParsedDocument } from '$lib/services/docParser/types';
+
 export const CHAT_DB_NAME = 'LeedPDFChat';
-const CHAT_DB_VERSION = 1;
+const BLOCKED_TIMEOUT_MS = 10_000;
+
+/**
+ * The schema, declared rather than migrated step by step: on open, anything
+ * missing is created. That also heals a database that exists without its
+ * stores — e.g. one created by a bare indexedDB.open() elsewhere, which would
+ * otherwise leave chat storage broken for good in that browser.
+ */
+const SCHEMA: Record<string, { keyPath: string; indexes: [string, string | string[], boolean?][] }> = {
+	sessions: {
+		keyPath: 'id',
+		indexes: [
+			['by_pdf', 'pdfKey'],
+			['by_pdf_created', ['pdfKey', 'createdAt']],
+			['by_highlight', 'highlightId', true],
+			['by_summary_state', ['pdfKey', 'summaryState']]
+		]
+	},
+	messages: {
+		keyPath: 'id',
+		indexes: [
+			['by_session_seq', ['sessionId', 'seq'], true],
+			['by_pdf', 'pdfKey']
+		]
+	},
+	// Parsed-document cache for the chat context, one row per PDF.
+	documents: { keyPath: 'pdfKey', indexes: [] },
+	meta: { keyPath: 'key', indexes: [] }
+};
+
+function schemaComplete(db: IDBDatabase): boolean {
+	const names = Object.keys(SCHEMA);
+	if (!names.every((n) => db.objectStoreNames.contains(n))) return false;
+	const tx = db.transaction(names);
+	return names.every((n) => {
+		const store = tx.objectStore(n);
+		return SCHEMA[n].indexes.every(([index]) => store.indexNames.contains(index));
+	});
+}
+
+function applySchema(db: IDBDatabase, tx: IDBTransaction) {
+	for (const [name, def] of Object.entries(SCHEMA)) {
+		const store = db.objectStoreNames.contains(name)
+			? tx.objectStore(name)
+			: db.createObjectStore(name, { keyPath: def.keyPath });
+		for (const [index, keyPath, unique] of def.indexes) {
+			if (!store.indexNames.contains(index)) store.createIndex(index, keyPath, { unique: !!unique });
+		}
+	}
+}
 
 export type SummaryState = 'idle' | 'armed' | 'generating' | 'ready' | 'failed' | 'skipped';
 
@@ -108,27 +159,31 @@ export class ChatStorageManager {
 		if (!this.factory) return Promise.reject(new ChatStorageError('IndexedDB is not available'));
 		if (this.db) return this.db;
 
-		const opening = new Promise<IDBDatabase>((resolve, reject) => {
-			const req = this.factory!.open(this.dbName, CHAT_DB_VERSION);
-			req.onupgradeneeded = () => {
-				const db = req.result;
-				// v1. Future versions add migrations here, keyed on event.oldVersion.
-				const sessions = db.createObjectStore('sessions', { keyPath: 'id' });
-				sessions.createIndex('by_pdf', 'pdfKey');
-				sessions.createIndex('by_pdf_created', ['pdfKey', 'createdAt']);
-				sessions.createIndex('by_highlight', 'highlightId', { unique: true });
-				sessions.createIndex('by_summary_state', ['pdfKey', 'summaryState']);
+		const opening = this.openAt(undefined).then((db) => {
+			if (schemaComplete(db)) return db;
+			// Created elsewhere, or by an older build: upgrade once to fill the gaps.
+			const next = db.version + 1;
+			db.close();
+			return this.openAt(next);
+		});
 
-				const messages = db.createObjectStore('messages', { keyPath: 'id' });
-				messages.createIndex('by_session_seq', ['sessionId', 'seq'], { unique: true });
-				messages.createIndex('by_pdf', 'pdfKey');
+		this.db = opening;
+		// Don't cache a failure — let the next call retry.
+		opening.catch(() => {
+			if (this.db === opening) this.db = null;
+		});
+		return opening;
+	}
 
-				// Parsed-document cache for the chat context (one row per PDF). Created
-				// now so adding the parser later doesn't need a schema upgrade.
-				db.createObjectStore('documents', { keyPath: 'pdfKey' });
-				db.createObjectStore('meta', { keyPath: 'key' });
-			};
+	/** Open at a version (or the current one), applying the schema on upgrade. */
+	private openAt(version: number | undefined): Promise<IDBDatabase> {
+		return new Promise<IDBDatabase>((resolve, reject) => {
+			let blockedTimer: ReturnType<typeof setTimeout> | undefined;
+			const req =
+				version === undefined ? this.factory!.open(this.dbName) : this.factory!.open(this.dbName, version);
+			req.onupgradeneeded = () => applySchema(req.result, req.transaction!);
 			req.onsuccess = () => {
+				clearTimeout(blockedTimer);
 				const db = req.result;
 				// Step aside if another tab needs to upgrade the schema, instead of
 				// blocking it indefinitely — the next call reopens at the new version.
@@ -138,18 +193,20 @@ export class ChatStorageManager {
 				};
 				resolve(db);
 			};
-			req.onerror = () =>
+			req.onerror = () => {
+				clearTimeout(blockedTimer);
 				reject(new ChatStorageError('Could not open chat storage', { cause: req.error }));
-			req.onblocked = () =>
-				reject(new ChatStorageError('Chat storage upgrade is blocked by another open tab'));
+			};
+			// 'blocked' doesn't fail the request: it stays pending until the other
+			// connections close, which ours do on versionchange. Only give up if a
+			// connection that doesn't cooperate keeps holding on.
+			req.onblocked = () => {
+				blockedTimer ??= setTimeout(
+					() => reject(new ChatStorageError('Chat storage upgrade is blocked by another open tab')),
+					BLOCKED_TIMEOUT_MS
+				);
+			};
 		});
-
-		this.db = opening;
-		// Don't cache a failure — let the next call retry.
-		opening.catch(() => {
-			if (this.db === opening) this.db = null;
-		});
-		return opening;
 	}
 
 	async listSessions(pdfKey: string): Promise<ChatSession[]> {
@@ -229,6 +286,32 @@ export class ChatStorageManager {
 			const keys = await request(store.index('by_pdf').getAllKeys(IDBKeyRange.only(pdfKey)));
 			for (const key of keys) store.delete(key);
 		}
+		await transactionDone(tx);
+	}
+
+	// -----------------------------------------------------------------------
+	// Parsed-document cache
+	// -----------------------------------------------------------------------
+
+	async getDocument(pdfKey: string): Promise<ParsedDocument | null> {
+		const db = await this.open();
+		const doc = await request<ParsedDocument | undefined>(
+			db.transaction('documents').objectStore('documents').get(pdfKey)
+		);
+		return doc ?? null;
+	}
+
+	async putDocument(doc: ParsedDocument): Promise<void> {
+		const db = await this.open();
+		const tx = db.transaction('documents', 'readwrite');
+		tx.objectStore('documents').put(doc);
+		await transactionDone(tx);
+	}
+
+	async deleteDocument(pdfKey: string): Promise<void> {
+		const db = await this.open();
+		const tx = db.transaction('documents', 'readwrite');
+		tx.objectStore('documents').delete(pdfKey);
 		await transactionDone(tx);
 	}
 

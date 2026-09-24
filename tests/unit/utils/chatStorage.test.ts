@@ -188,3 +188,90 @@ describe('ChatStorageManager', () => {
 		});
 	});
 });
+
+describe('parsed-document cache', () => {
+	const doc = (pdfKey: string) => ({
+		schemaVersion: 1 as const,
+		pdfKey,
+		parsedAt: 1,
+		sourceFingerprint: 'fp',
+		parser: { name: 'mineru' as const, version: '4.0.7', tier: 'flash' },
+		pageCount: 1,
+		blocks: [{ idx: 0, type: 'text' as const, text: 'hello', pageNumber: 1 }],
+		outline: [],
+		references: []
+	});
+
+	it('stores, returns and deletes one document per key', async () => {
+		await storage.putDocument(doc('a.pdf_1'));
+		await storage.putDocument(doc('b.pdf_2'));
+		expect(await storage.getDocument('a.pdf_1')).toEqual(doc('a.pdf_1'));
+		await storage.deleteDocument('a.pdf_1');
+		expect(await storage.getDocument('a.pdf_1')).toBeNull();
+		expect(await storage.getDocument('b.pdf_2')).not.toBeNull();
+	});
+
+	it('is untouched by clearing a document’s chats', async () => {
+		await storage.putDocument(doc('paper.pdf_100'));
+		await storage.deleteByPdfKey('paper.pdf_100');
+		expect(await storage.getDocument('paper.pdf_100')).not.toBeNull();
+	});
+});
+
+describe('schema healing', () => {
+	const rawOpen = (version?: number, upgrade?: (db: IDBDatabase) => void) =>
+		new Promise<IDBDatabase>((resolve, reject) => {
+			const req = version === undefined ? factory.open(CHAT_DB_NAME) : factory.open(CHAT_DB_NAME, version);
+			req.onupgradeneeded = () => upgrade?.(req.result);
+			req.onsuccess = () => resolve(req.result);
+			req.onerror = () => reject(req.error);
+		});
+
+	it('repairs a database that was created without any object stores', async () => {
+		// What a bare indexedDB.open(name) does to a fresh browser: v1, empty.
+		(await rawOpen()).close();
+
+		await storage.putSession(session({ id: 'after-heal' }));
+		expect(await storage.getSession('after-heal')).not.toBeNull();
+		storage.close();
+
+		const db = await rawOpen();
+		expect(db.version).toBe(2);
+		expect([...db.objectStoreNames].sort()).toEqual(['documents', 'messages', 'meta', 'sessions']);
+		db.close();
+	});
+
+	it('adds a missing index without losing existing data', async () => {
+		(
+			await rawOpen(1, (db) => {
+				const sessions = db.createObjectStore('sessions', { keyPath: 'id' });
+				sessions.createIndex('by_pdf', 'pdfKey');
+				sessions.put(session({ id: 'old' }));
+			})
+		).close();
+
+		// by_pdf_created is missing; listSessions needs it.
+		expect((await storage.listSessions('paper.pdf_100')).map((s) => s.id)).toEqual(['old']);
+	});
+
+	it('waits out a briefly blocked upgrade instead of failing', async () => {
+		// An empty v1 database held open by a connection that closes a moment
+		// later — as another tab does when it receives versionchange late.
+		const holder = await rawOpen();
+		setTimeout(() => holder.close(), 50);
+
+		await storage.putSession(session({ id: 'waited' }));
+		expect(await storage.getSession('waited')).not.toBeNull();
+	});
+
+	it('opens a complete database without bumping its version', async () => {
+		await storage.isAvailable();
+		storage.close();
+		const again = new ChatStorageManager(factory);
+		await again.isAvailable();
+		again.close();
+		const db = await rawOpen();
+		expect(db.version).toBe(1);
+		db.close();
+	});
+});

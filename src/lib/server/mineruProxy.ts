@@ -105,8 +105,12 @@ export async function forwardToMinerU(
 		clearTimeout(timer);
 	}
 
+	// Not Content-Length or Content-Encoding: MinerU gzips large responses and
+	// fetch hands us the body already decompressed, so the upstream length is the
+	// *compressed* size — forwarding it made browsers stop reading a 1.9 MB parse
+	// result at 1.27 MB. The runtime frames the decoded body itself.
 	const out = new Headers();
-	for (const name of ['content-type', 'content-length', 'content-disposition']) {
+	for (const name of ['content-type', 'content-disposition']) {
 		const value = res.headers.get(name);
 		if (value) out.set(name, value);
 	}

@@ -113,6 +113,30 @@ describe('forwardToMinerU', () => {
 		expect(res.headers.get('set-cookie')).toBeNull();
 	});
 
+	it('drops the upstream length and encoding, which describe a body already decompressed', async () => {
+		// What fetch returns for a gzipped MinerU response: decoded body, but the
+		// headers still describe the compressed bytes.
+		const decoded = JSON.stringify({ pages: [], padding: 'x'.repeat(5000) });
+		const fetchImpl = vi.fn(
+			async () =>
+				new Response(decoded, {
+					headers: {
+						'Content-Type': 'application/json',
+						'Content-Encoding': 'gzip',
+						'Content-Length': '1200'
+					}
+				})
+		);
+		const res = await forwardToMinerU(req('GET', 'v1/files/file-1/content'), 'v1/files/file-1/content', {
+			upstream: UPSTREAM,
+			fetchImpl
+		});
+		expect(res.headers.get('content-length')).toBeNull();
+		expect(res.headers.get('content-encoding')).toBeNull();
+		expect(res.headers.get('content-type')).toBe('application/json');
+		expect(await res.text()).toBe(decoded);
+	});
+
 	it('passes upstream errors through unchanged', async () => {
 		const body = { error: { code: 'quality_tier_unavailable', message: 'Pass tier=flash' } };
 		const res = await forwardToMinerU(req('POST', 'v1/parse/jobs', { body: '{}' }), 'v1/parse/jobs', {

@@ -93,11 +93,19 @@ function headingLevel(text: string, reported: unknown): number {
 	return typeof reported === 'number' && reported >= 1 ? Math.min(Math.round(reported), 6) : 2;
 }
 
+// Flash-tier parsing labels some display equations and author emails as
+// headings ("MultiHead(Q, K, V) = Concat(…)"); they'd pollute the outline that
+// goes into every prompt. Real headings essentially never contain either.
+const LOOKS_LIKE_EQUATION = /=/;
+const LOOKS_LIKE_EMAIL = /^\S+@\S+\.\S+$/;
+
 function classify(type: string, text: string): ParsedBlockType | null {
 	switch (type) {
 		case 'doc_title':
 		case 'paragraph_title':
 		case 'title':
+			if (type !== 'doc_title' && LOOKS_LIKE_EQUATION.test(text)) return 'equation';
+			if (LOOKS_LIKE_EMAIL.test(text.trim())) return 'text';
 			return 'heading';
 		case 'table':
 		case 'simple_table':

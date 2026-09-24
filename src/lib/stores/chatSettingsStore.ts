@@ -14,7 +14,17 @@ export interface ChatSettings {
 	/** Idle time after an answer before its conversation is summarised. */
 	summaryIdleMs: number;
 	autoSummarize: boolean;
+	/** The app's MinerU relay; change only to point at another relay. */
+	parserEndpoint: string;
+	/** Optional MinerU key (e.g. for mineru.net), sent through the relay. */
+	parserApiKey: string;
+	/** 'auto' picks the best tier the server runs. */
+	parserTier: 'auto' | 'flash' | 'basic' | 'standard' | 'advanced';
+	/** Start parsing as soon as a document is opened. */
+	autoParse: boolean;
 }
+
+const PARSER_TIERS = ['auto', 'flash', 'basic', 'standard', 'advanced'];
 
 export const CHAT_SETTINGS_KEY = 'leedpdf_chat_settings';
 
@@ -24,7 +34,11 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
 	chatModel: 'anthropic/claude-sonnet-5',
 	summaryModel: '',
 	summaryIdleMs: 60_000,
-	autoSummarize: true
+	autoSummarize: true,
+	parserEndpoint: '/api/mineru',
+	parserApiKey: '',
+	parserTier: 'auto',
+	autoParse: true
 };
 
 /** Merge stored values over the defaults, ignoring anything malformed. */
@@ -41,7 +55,11 @@ export function parseChatSettings(raw: string | null): ChatSettings {
 			chatModel: pick('chatModel', (v) => isString(v) && (v as string).trim() !== ''),
 			summaryModel: pick('summaryModel', isString),
 			summaryIdleMs: pick('summaryIdleMs', (v) => typeof v === 'number' && v >= 5_000),
-			autoSummarize: pick('autoSummarize', (v) => typeof v === 'boolean')
+			autoSummarize: pick('autoSummarize', (v) => typeof v === 'boolean'),
+			parserEndpoint: pick('parserEndpoint', (v) => isString(v) && (v as string).trim() !== ''),
+			parserApiKey: pick('parserApiKey', isString),
+			parserTier: pick('parserTier', (v) => PARSER_TIERS.includes(v as string)),
+			autoParse: pick('autoParse', (v) => typeof v === 'boolean')
 		};
 	} catch {
 		return { ...DEFAULT_CHAT_SETTINGS };

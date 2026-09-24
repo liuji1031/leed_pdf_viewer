@@ -53,6 +53,12 @@ export interface ParsedDocument {
 	schemaVersion: typeof PARSED_DOCUMENT_SCHEMA_VERSION;
 	pdfKey: string;
 	parsedAt: number;
+	/**
+	 * pdf.js's content fingerprint of the parsed file. The cache is keyed by
+	 * name_size like the annotations are, and URL-loaded PDFs all have size 0 —
+	 * so two different papers can share a key. A fingerprint mismatch is a miss.
+	 */
+	sourceFingerprint?: string;
 	parser: { name: 'mineru'; version?: string; tier?: string };
 	pageCount: number;
 	title?: string;
