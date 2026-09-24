@@ -1,0 +1,26 @@
+# GPU override for the MinerU parser. Requires an NVIDIA GPU and the NVIDIA
+# Container Toolkit on the host.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile prod up -d --build
+#
+# Installs MinerU with its model-based extras and serves the `standard` tier
+# (the app picks the best tier the server offers). Device settings follow
+# upstream's own GPU compose (docker/compose.yaml in the MinerU repo).
+# Not tested on this project's CI, which has no GPU.
+services:
+  mineru:
+    build:
+      args:
+        EXTRAS: full
+    command: ["api-server", "--host", "0.0.0.0", "--port", "8000", "--tier", "standard"]
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]

@@ -123,7 +123,16 @@ ENV PUBLIC_POSTHOG_KEY=$PUBLIC_POSTHOG_KEY \
 RUN pnpm build
 
 # ---------------------------------------------------------------------------
-# runtime — adapter-node output only; no pnpm store, no source
+# prod-deps — runtime dependencies only. adapter-node bundles devDependencies
+# into the build and leaves `dependencies` external, so only these ship.
+# ---------------------------------------------------------------------------
+FROM base AS prod-deps
+COPY --chown=node:node package.json pnpm-lock.yaml .npmrc ./
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store,uid=1000,gid=1000 \
+    pnpm install --prod --frozen-lockfile --ignore-scripts
+
+# ---------------------------------------------------------------------------
+# runtime — adapter-node output only; no pnpm store, no source, no dev deps
 # ---------------------------------------------------------------------------
 FROM node:${NODE_VERSION}-slim AS runtime
 ENV NODE_ENV=production \
@@ -131,8 +140,10 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0
 WORKDIR /app
 COPY --from=build /app/build ./build
-COPY --from=build /app/node_modules ./node_modules
+COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 USER node
 EXPOSE 3000
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s \
+    CMD node -e "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "build"]

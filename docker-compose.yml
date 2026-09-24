@@ -57,11 +57,39 @@ services:
   # https://mineru.net/api with MINERU_API_KEY.
   # ---------------------------------------------------------------------
   mineru:
-    profiles: [dev]
+    profiles: [dev, prod]
     build:
       context: docker/mineru
     volumes:
       - mineru-models:/models
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # Production: the adapter-node build. http://localhost:3000
+  #   docker compose --profile prod up -d --build
+  # PUBLIC_* are build args (inlined at build time); see .env.docker.example.
+  # ---------------------------------------------------------------------
+  app:
+    profiles: [prod]
+    build:
+      context: .
+      target: runtime
+      args:
+        <<: *public-env
+    environment:
+      MINERU_URL: ${MINERU_URL:-http://mineru:8000}
+      MINERU_API_KEY: ${MINERU_API_KEY:-}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      # adapter-node needs the public origin for form actions / CSRF checks.
+      ORIGIN: ${ORIGIN:-http://localhost:3000}
+      BODY_SIZE_LIMIT: ${BODY_SIZE_LIMIT:-110M}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    depends_on:
+      mineru:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
 
   # ---------------------------------------------------------------------
   # Unit tests (vitest + jsdom).

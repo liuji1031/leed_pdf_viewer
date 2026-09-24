@@ -134,7 +134,17 @@ Open `http://localhost:4173` in your browser.
 | Zoom | `Ctrl +/-`, `Ctrl 0` to reset |
 | Actions | `Ctrl Z/Y` for undo/redo |
 | Upload | `U` to choose file |
+| Paper chat | `8` ask tool, `C` show/hide chat |
 | Help | `?` or `F1` |
+
+### Paper chat
+Ask an AI about any passage of a research paper, and keep the conversation anchored to it.
+
+1. Open the chat with `C` (or the chat button) and add your [OpenRouter](https://openrouter.ai) API key in its settings.
+2. Choose the ask tool (`8`), select a term or sentence, and click **Ask about…**.
+3. The passage stays highlighted. **Double-click** it to reopen the conversation; **hover** it for a short summary in the left margin — written once the conversation has been idle for a minute (adjustable), or as soon as you select another passage.
+
+Answers draw on the whole paper's structure — title, abstract, outline, figures, the text around the passage and the references it cites — which comes from parsing the PDF with [MinerU](https://github.com/opendatalab/MinerU). Papers are parsed in the background when opened; see Docker below for running the parser. Conversations are saved in your browser (IndexedDB). Your API key stays in this browser and is sent only to OpenRouter.
 
 ## 🎯 Perfect For
 
@@ -164,6 +174,27 @@ pnpm preview
 # Or use the shorthand:
 pnpm prev
 ```
+
+### Docker
+No local Node needed — everything runs through Docker Compose profiles:
+
+```bash
+docker compose --profile dev up                    # app with HMR on :5173, plus the MinerU parser
+docker compose --profile test run --rm unit        # unit tests (vitest)
+docker compose --profile test run --rm typecheck   # svelte-check
+docker compose --profile test run --rm e2e --project=firefox --project=webkit   # Playwright
+docker compose --profile prod up -d --build        # production build on :3000, plus MinerU
+
+# Parser on an NVIDIA GPU (needs the NVIDIA Container Toolkit; untested in CI):
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile prod up -d --build
+```
+
+Configuration lives in `.env` — copy `.env.docker.example`. Notes:
+- The browser never talks to MinerU directly (it sends no CORS headers); the app relays through its own `/api/mineru` route to `MINERU_URL`. Set `MINERU_URL=https://mineru.net/api` and `MINERU_API_KEY` to use the hosted parser instead of the bundled one — it then receives a copy of every paper opened.
+- The bundled CPU parser serves MinerU's fast `flash` tier; the GPU override serves `standard` (better equations and layout).
+- `PUBLIC_*` values are compiled into the client, so they are build arguments: rebuild after changing them.
+- Containers run as uid 1000 so files they write into the checkout stay yours.
+- The Tauri desktop app is not built in Docker; parsing needs the server relay, so it is web-only for now.
 
 ### Building the Tauri Desktop App
 ```bash

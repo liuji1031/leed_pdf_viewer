@@ -38,6 +38,7 @@ Thumbs.db
 .env.*
 !.env.example
 !.env.test
+!.env.docker.example
 
 # Appwrite
 appwrite.config.json
