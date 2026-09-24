@@ -39,9 +39,29 @@ services:
       VITE_HMR_HOST: ${VITE_HMR_HOST:-localhost}
       VITE_HMR_PORT: ${VITE_HMR_PORT:-5173}
       VITE_DEV_MODE: "true"
+      # The app reaches MinerU through its own /api/mineru route (browsers
+      # can't call MinerU directly — it sends no CORS headers).
+      MINERU_URL: ${MINERU_URL:-http://mineru:8000}
+      MINERU_API_KEY: ${MINERU_API_KEY:-}
     volumes: *source-mount
     ports:
       - "${DEV_PORT:-5173}:5173"
+    depends_on:
+      mineru:
+        condition: service_healthy
+        required: false
+
+  # ---------------------------------------------------------------------
+  # MinerU document parser (CPU, `flash` tier). Not published to the host:
+  # the app is its only client. Set MINERU_URL to use another server, e.g.
+  # https://mineru.net/api with MINERU_API_KEY.
+  # ---------------------------------------------------------------------
+  mineru:
+    profiles: [dev]
+    build:
+      context: docker/mineru
+    volumes:
+      - mineru-models:/models
 
   # ---------------------------------------------------------------------
   # Unit tests (vitest + jsdom).
@@ -86,3 +106,7 @@ services:
     volumes: *source-mount
     # Chromium's sandbox needs more than the default 64MB of shared memory.
     shm_size: 1gb
+
+volumes:
+  # Parser model weights: downloaded once, kept across rebuilds.
+  mineru-models:
