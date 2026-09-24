@@ -7,6 +7,7 @@
 	export let blockedReason: string | null = null;
 	export let busy = false;
 	export let wholePaper = false;
+	export let attachPage = false;
 	/** Rough size of what will be sent, e.g. "≈4.8k tokens". */
 	export let contextNote = '';
 	export let onSend: (text: string) => void;
@@ -82,10 +83,16 @@
 		{/if}
 	</div>
 	<div class="flex items-center justify-between gap-2 text-[11px] text-slate dark:text-gray-400">
-		<label class="flex items-center gap-1.5">
-			<input type="checkbox" bind:checked={wholePaper} class="rounded text-sage focus:ring-sage" />
-			Include the whole paper
-		</label>
+		<span class="flex items-center gap-3">
+			<label class="flex items-center gap-1.5">
+				<input type="checkbox" bind:checked={wholePaper} class="rounded text-sage focus:ring-sage" />
+				Whole paper
+			</label>
+			<label class="flex items-center gap-1.5" title="Send an image of the page — for equations and figures">
+				<input type="checkbox" bind:checked={attachPage} class="rounded text-sage focus:ring-sage" data-testid="chat-attach-page" />
+				Page image
+			</label>
+		</span>
 		{#if blockedReason}
 			<span class="text-amber-700 dark:text-amber-400">{blockedReason}</span>
 		{:else if contextNote}

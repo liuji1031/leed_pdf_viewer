@@ -32,7 +32,8 @@
 		chatSessions,
 		ensureMessagesLoaded
 	} from '$lib/stores/chatStore';
-	import { chatHighlights } from '$lib/stores/drawingStore';
+	import { chatHighlights, pdfState } from '$lib/stores/drawingStore';
+	import { renderPageImage } from '$lib/utils/pageImage';
 	import {
 		openDocument,
 		openDocumentParse,
@@ -56,6 +57,7 @@
 	let transcript: HTMLDivElement;
 	let sendError: string | null = null;
 	let wholePaper = false;
+	let attachPage = false;
 
 	$: activeSession = $chatSessions.find((s) => s.id === $activeSessionId) ?? null;
 	$: messages = activeSession ? ($chatMessages.get(activeSession.id) ?? []) : [];
@@ -80,6 +82,28 @@
 	$: if ($activeSessionId) ensureMessagesLoaded($activeSessionId).catch(() => {});
 	$: if (messages) scrollToEnd();
 	$: if (pendingAsk) composer?.focus();
+
+	// Suggest the page image when the passage involves something text can't
+	// carry: an equation the parser couldn't transcribe, or a figure.
+	$: if (pendingAsk && parsed) attachPage = needsPageImage(parsed, pendingAsk);
+	function needsPageImage(doc: NonNullable<typeof parsed>, ask: NonNullable<typeof pendingAsk>): boolean {
+		try {
+			const snapshot = buildSessionContext(doc, ask).snapshot;
+			return snapshot.includes('[equation — not transcribed') || /\[passage block\]\n\[figure/.test(snapshot);
+		} catch {
+			return false;
+		}
+	}
+
+	async function pageImageFor(pageNumber: number): Promise<string | undefined> {
+		if (!attachPage || !$pdfState.document) return undefined;
+		try {
+			return await renderPageImage($pdfState.document, pageNumber);
+		} catch (error) {
+			console.warn('Could not render the page image:', error);
+			return undefined;
+		}
+	}
 
 	async function scrollToEnd() {
 		await tick();
@@ -129,14 +153,16 @@
 			const request = pendingAsk;
 			askRequest.set(null);
 			try {
-				await chat.startConversation(request, text, { wholePaper });
+				const pageImage = await pageImageFor(request.pageNumber);
+				await chat.startConversation(request, text, { wholePaper, pageImage });
 			} catch (error) {
 				askRequest.set(request); // keep the quote so nothing is lost
 				sendError = error instanceof ChatError ? error.message : String(error);
 			}
 		} else if (activeSession) {
 			try {
-				await chat.sendMessage(activeSession.id, text, { wholePaper });
+				const pageImage = await pageImageFor(activeSession.pageNumber);
+				await chat.sendMessage(activeSession.id, text, { wholePaper, pageImage });
 			} catch (error) {
 				sendError = error instanceof ChatError ? error.message : String(error);
 			}
@@ -349,6 +375,7 @@
 				<ChatComposer
 					bind:this={composer}
 					bind:wholePaper
+					bind:attachPage
 					placeholder={pendingAsk ? 'Ask about this passage…' : 'Ask a follow-up…'}
 					{blockedReason}
 					{busy}

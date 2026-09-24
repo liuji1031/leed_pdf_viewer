@@ -244,6 +244,30 @@ test.describe('Paper chat', () => {
 		await expect(page.locator('.chat-highlight-rect')).toHaveCount(0);
 	});
 
+	test('can attach an image of the page for multimodal models', async ({ page }) => {
+		await mockParser(page);
+		const requests = await mockOpenRouter(page);
+		await page.addInitScript(() =>
+			localStorage.setItem('leedpdf_chat_settings', JSON.stringify({ apiKey: 'sk-or-v1-test' }))
+		);
+		await openPdf(page, fixture);
+		await page.keyboard.press('c');
+		await expect(page.getByTestId('parse-status')).toHaveAttribute('data-status', 'done', { timeout: 20_000 });
+		await selectTitle(page);
+		await page.getByTestId('ask-selection-chip').click();
+
+		await page.getByTestId('chat-attach-page').check();
+		await page.getByTestId('chat-input').fill('What does the page show?');
+		await page.keyboard.press('Enter');
+		await expect(assistant(page).first()).toHaveAttribute('data-status', 'complete');
+
+		const last = requests[0].messages.at(-1)!.content as { type: string; image_url?: { url: string } }[];
+		expect(last.map((p) => p.type)).toEqual(['text', 'image_url']);
+		const url = last[1].image_url!.url;
+		expect(url).toMatch(/^data:image\/(webp|jpeg);base64,/);
+		expect(url.length).toBeGreaterThan(5_000); // an actual rendered page, not a blank
+	});
+
 	test('explains what is missing before a question can be asked', async ({ page }) => {
 		await mockParser(page, { configured: false });
 		await openPdf(page, fixture);
