@@ -36,14 +36,21 @@ export function zoomLabel(page: Page) {
 	return page.evaluate(() => document.body.innerText.match(/(\d+)%/)?.[1] ?? '');
 }
 
-/** Upload the PDF and wait until the load flow has fully finished. */
-export async function openPdf(page: Page, buffer: Buffer) {
+export const PROBE_FILE_NAME = 'probes.pdf';
+
+/**
+ * Upload the PDF and wait until the load flow has fully finished.
+ * `beforeUpload` runs once the app is loaded but before the file is opened —
+ * the place to seed localStorage for that document.
+ */
+export async function openPdf(page: Page, buffer: Buffer, beforeUpload?: () => Promise<void>) {
 	await page.goto('/');
 	await page.waitForLoadState('networkidle');
+	await beforeUpload?.();
 	await page
 		.locator('input[type="file"]')
 		.first()
-		.setInputFiles({ name: 'probes.pdf', mimeType: 'application/pdf', buffer });
+		.setInputFiles({ name: PROBE_FILE_NAME, mimeType: 'application/pdf', buffer });
 	// Wait for the canvas to be painted at the fit scale the page-info label
 	// reports. A non-trivial width alone isn't enough — an unrendered <canvas>
 	// is 300×150 by default, which would let a test press keys mid-load, where

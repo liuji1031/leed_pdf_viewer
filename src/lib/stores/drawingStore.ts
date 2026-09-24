@@ -1,6 +1,7 @@
 import { derived, writable } from 'svelte/store';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { DEFAULT_TEXT_FONT, BUNDLED_FONTS, getAllAvailableFonts, type FontOption } from '../config/fonts';
+import type { NormRect, TextAnchor } from '../utils/textAnchor';
 
 export type DrawingTool =
 	| 'pencil'
@@ -141,6 +142,26 @@ export interface ImageAnnotation {
 	relativeY: number; // 0-1 range for scaling
 	relativeWidth: number; // 0-1 relative to basePageWidth
 	relativeHeight: number; // 0-1 relative to basePageHeight
+}
+
+/**
+ * A passage anchored to a chat conversation. Geometry is authoritative in
+ * `rects` (rotation-0, normalised to the page), so it needs no scale or
+ * rotation fields. The summary is denormalised from the chat session so the
+ * hover card can render without an async read on every mouse move.
+ */
+export interface ChatHighlight {
+	id: string;
+	pageNumber: number;
+	sessionId: string;
+	rects: NormRect[];
+	anchor: TextAnchor;
+	createdAt: number;
+	/** 1-based, in creation order across the document; shown on the highlight. */
+	ordinal: number;
+	summaryStatus: 'none' | 'pending' | 'ready' | 'failed';
+	summary?: string;
+	messageCount?: number;
 }
 
 // Stamp definitions
@@ -316,6 +337,9 @@ export const arrowAnnotations = writable<Map<number, ArrowAnnotation[]>>(new Map
 // Image annotations store - stores all pasted image annotations per page
 export const imageAnnotations = writable<Map<number, ImageAnnotation[]>>(new Map());
 
+// Chat highlights - separate store, following the same per-page pattern
+export const chatHighlights = writable<Map<number, ChatHighlight[]>>(new Map());
+
 // Auto-save functionality - Storage keys configuration
 const STORAGE_KEYS = {
 	drawings: 'leedpdf_drawings',
@@ -324,6 +348,7 @@ const STORAGE_KEYS = {
 	stamps: 'leedpdf_stamp_annotations',
 	arrows: 'leedpdf_arrow_annotations',
 	images: 'leedpdf_image_annotations',
+	chatHighlights: 'leedpdf_chat_highlights',
 	pdfInfo: 'leedpdf_current_pdf'
 } as const;
 
@@ -334,6 +359,7 @@ const STORAGE_KEY_STICKY_NOTES = STORAGE_KEYS.stickyNotes;
 const STORAGE_KEY_STAMP_ANNOTATIONS = STORAGE_KEYS.stamps;
 const STORAGE_KEY_ARROW_ANNOTATIONS = STORAGE_KEYS.arrows;
 const STORAGE_KEY_IMAGE_ANNOTATIONS = STORAGE_KEYS.images;
+const STORAGE_KEY_CHAT_HIGHLIGHTS = STORAGE_KEYS.chatHighlights;
 const STORAGE_KEY_PDF_INFO = STORAGE_KEYS.pdfInfo;
 
 // Track current PDF to associate drawings with specific files
@@ -493,6 +519,7 @@ export const setCurrentPDF = (fileName: string, fileSize: number) => {
 	loadStampAnnotationsForCurrentPDF();
 	loadArrowAnnotationsForCurrentPDF();
 	loadImageAnnotationsForCurrentPDF();
+	loadChatHighlightsForCurrentPDF();
 
 	// Clear any text annotation selection from the previous PDF
 	selectedTextAnnotationId.set(null);
@@ -517,6 +544,9 @@ const loadArrowAnnotationsForCurrentPDF = createAnnotationLoader<ArrowAnnotation
 const loadImageAnnotationsForCurrentPDF = createAnnotationLoader<ImageAnnotation>(
 	STORAGE_KEY_IMAGE_ANNOTATIONS, imageAnnotations, 'image annotations'
 );
+const loadChatHighlightsForCurrentPDF = createAnnotationLoader<ChatHighlight>(
+	STORAGE_KEY_CHAT_HIGHLIGHTS, chatHighlights, 'chat highlights'
+);
 
 // Load last PDF info on initialization
 if (typeof window !== 'undefined') {
@@ -532,6 +562,7 @@ if (typeof window !== 'undefined') {
 			loadStampAnnotationsForCurrentPDF();
 			loadArrowAnnotationsForCurrentPDF();
 			loadImageAnnotationsForCurrentPDF();
+			loadChatHighlightsForCurrentPDF();
 		}
 	} catch (error) {
 		console.error('Error loading PDF info from localStorage:', error);
@@ -545,6 +576,7 @@ setupAnnotationAutoSave<StickyNoteAnnotation>(STORAGE_KEY_STICKY_NOTES, stickyNo
 setupAnnotationAutoSave<StampAnnotation>(STORAGE_KEY_STAMP_ANNOTATIONS, stampAnnotations, 'stamp annotations');
 setupAnnotationAutoSave<ArrowAnnotation>(STORAGE_KEY_ARROW_ANNOTATIONS, arrowAnnotations, 'arrow annotations');
 setupAnnotationAutoSave<ImageAnnotation>(STORAGE_KEY_IMAGE_ANNOTATIONS, imageAnnotations, 'image annotations');
+setupAnnotationAutoSave<ChatHighlight>(STORAGE_KEY_CHAT_HIGHLIGHTS, chatHighlights, 'chat highlights');
 
 // Undo/redo functionality
 export const undoStack = writable<Array<{ pageNumber: number; paths: DrawingPath[] }>>([]);
@@ -869,6 +901,7 @@ const stickyNotesCRUD = createAnnotationCRUD(stickyNoteAnnotations);
 const stampsCRUD = createAnnotationCRUD(stampAnnotations);
 const arrowsCRUD = createAnnotationCRUD(arrowAnnotations);
 const imagesCRUD = createAnnotationCRUD(imageAnnotations);
+const chatHighlightsCRUD = createAnnotationCRUD(chatHighlights);
 
 // Text annotation management functions (exported for backward compatibility)
 export const addTextAnnotation = textAnnotationsCRUD.add;
@@ -919,6 +952,10 @@ export const addImageAnnotation = imagesCRUD.add;
 export const updateImageAnnotation = imagesCRUD.update;
 export const deleteImageAnnotation = imagesCRUD.delete;
 
+export const addChatHighlight = chatHighlightsCRUD.add;
+export const updateChatHighlight = chatHighlightsCRUD.update;
+export const deleteChatHighlight = chatHighlightsCRUD.delete;
+
 // Force save all annotation data to localStorage immediately
 // This ensures all pending changes are persisted before operations like export
 export const forceSaveAllAnnotations = (): void => {
@@ -945,6 +982,7 @@ export const forceSaveAllAnnotations = (): void => {
 		forceSaveStore(stampAnnotations, STORAGE_KEY_STAMP_ANNOTATIONS);
 		forceSaveStore(arrowAnnotations, STORAGE_KEY_ARROW_ANNOTATIONS);
 		forceSaveStore(imageAnnotations, STORAGE_KEY_IMAGE_ANNOTATIONS);
+		forceSaveStore(chatHighlights, STORAGE_KEY_CHAT_HIGHLIGHTS);
 
 		console.log(`Force saved all annotations for PDF ${currentPDFKey}`);
 	} catch (error) {
@@ -965,5 +1003,13 @@ export const currentPageImageAnnotations = derived(
 	[imageAnnotations, pdfState],
 	([$imageAnnotations, $pdfState]) => {
 		return $imageAnnotations.get($pdfState.currentPage) || [];
+	}
+);
+
+// Derived store for current page chat highlights
+export const currentPageChatHighlights = derived(
+	[chatHighlights, pdfState],
+	([$chatHighlights, $pdfState]) => {
+		return $chatHighlights.get($pdfState.currentPage) || [];
 	}
 );

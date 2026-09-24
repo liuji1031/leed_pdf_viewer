@@ -471,3 +471,53 @@ export function relocate(anchor: TextAnchor, idx: PageTextIndex): { start: numbe
 
 	return matches.length === 1 ? toRaw(matches[0]) : null;
 }
+
+// ---------------------------------------------------------------------------
+// Hit-testing
+// ---------------------------------------------------------------------------
+
+/**
+ * A client-space point as a normalised position on the unrotated page, or null
+ * if it lies off the page. `base` is the page's own bounding rect, which — as
+ * in clientRectsToNormRects — already folds in zoom, pan and pinch transforms.
+ */
+export function clientPointToNormPoint(
+	clientX: number,
+	clientY: number,
+	base: RectLike,
+	rotation: RotationAngle,
+	basePageWidth: number,
+	basePageHeight: number
+): { x: number; y: number } | null {
+	if (base.width <= 0 || base.height <= 0) return null;
+	const u = (clientX - base.left) / base.width;
+	const v = (clientY - base.top) / base.height;
+	if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+	const [dispW, dispH] = getRotatedDimensions(basePageWidth, basePageHeight, rotation);
+	const p = inverseTransformPoint(u * dispW, v * dispH, rotation, basePageWidth, basePageHeight);
+	return { x: p.x / basePageWidth, y: p.y / basePageHeight };
+}
+
+/**
+ * The highlight under a point, if any. `tolerance` pads each rect (in page
+ * fractions) so a thin line of text is easy to hover. Where highlights overlap,
+ * the most recently created one wins — it's drawn on top.
+ */
+export function hitTestHighlights<T extends { rects: NormRect[]; createdAt: number }>(
+	point: { x: number; y: number },
+	highlights: readonly T[],
+	tolerance = 0.002
+): T | null {
+	let hit: T | null = null;
+	for (const h of highlights) {
+		const inside = h.rects.some(
+			(r) =>
+				point.x >= r.x - tolerance &&
+				point.x <= r.x + r.w + tolerance &&
+				point.y >= r.y - tolerance &&
+				point.y <= r.y + r.h + tolerance
+		);
+		if (inside && (!hit || h.createdAt >= hit.createdAt)) hit = h;
+	}
+	return hit;
+}

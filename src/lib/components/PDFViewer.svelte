@@ -45,6 +45,7 @@
 	import LinkOverlay from './LinkOverlay.svelte';
 	import PDFTextLayer from './PDFTextLayer.svelte';
 	import AskSelectionChip from './AskSelectionChip.svelte';
+	import ChatHighlightOverlay from './ChatHighlightOverlay.svelte';
 	import TextSelectionOverlay from './TextSelectionOverlay.svelte';
 	import { TOOLBAR_HEIGHT } from '$lib/constants';
 	import { setWindowTitle } from '$lib/utils/tauriUtils';
@@ -3244,6 +3245,18 @@
 				class:hidden={!$pdfState.document}
 				style="z-index: 2;"
 			></canvas>
+
+			<!-- Chat highlights: always visible, never interactive (hover is hit-tested) -->
+			{#if $pdfState.document && canvasDisplayWidth > 0 && canvasDisplayHeight > 0}
+				<ChatHighlightOverlay
+					scale={$pdfState.scale}
+					rotation={$pdfState.rotation as RotationAngle}
+					{basePageWidth}
+					{basePageHeight}
+					canvasWidth={canvasDisplayWidth}
+					canvasHeight={canvasDisplayHeight}
+				/>
+			{/if}
 
 			<!-- Text Overlay for Custom Text Annotations -->
 			{#if $pdfState.document && canvasDisplayWidth > 0 && canvasDisplayHeight > 0}

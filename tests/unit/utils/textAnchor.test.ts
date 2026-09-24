@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
 	buildPageTextIndex,
+	clientPointToNormPoint,
 	clientRectsToNormRects,
 	coalesceLineRects,
 	CONTEXT_CHARS,
 	createSpanIndex,
 	domPointToTextPosition,
 	hashText,
+	hitTestHighlights,
 	MAX_RECTS,
 	normRectToDisplay,
 	offsetsToAnchor,
@@ -427,5 +429,63 @@ describe('textAnchor DOM endpoints', () => {
 			{ item: 0, offset: 0 },
 			{ item: 2, offset: 5 }
 		]);
+	});
+});
+
+describe('textAnchor hit-testing', () => {
+	const line1 = { x: 0.1, y: 0.2, w: 0.5, h: 0.02 };
+	const line2 = { x: 0.1, y: 0.24, w: 0.3, h: 0.02 };
+	const older = { id: 'older', rects: [line1, line2], createdAt: 1 };
+	const newer = { id: 'newer', rects: [{ x: 0.3, y: 0.195, w: 0.1, h: 0.03 }], createdAt: 2 };
+
+	describe('clientPointToNormPoint', () => {
+		for (const [label, pageW, pageH] of PAGES) {
+			for (const rotation of ROTATIONS) {
+				it(`maps a rect's centre back onto it — ${label}, ${rotation}°`, () => {
+					const rect = { x: 0.62, y: 0.3, w: 0.2, h: 0.02 };
+					const { client, base } = toClient(rect, rotation, pageW, pageH, 1.7);
+					const p = clientPointToNormPoint(
+						client.left + client.width / 2,
+						client.top + client.height / 2,
+						base,
+						rotation,
+						pageW,
+						pageH
+					)!;
+					expect(p.x).toBeCloseTo(rect.x + rect.w / 2, 6);
+					expect(p.y).toBeCloseTo(rect.y + rect.h / 2, 6);
+				});
+			}
+		}
+
+		it('returns null off the page', () => {
+			const base = { left: 100, top: 100, width: 612, height: 792 };
+			expect(clientPointToNormPoint(50, 300, base, 0, 612, 792)).toBeNull();
+			expect(clientPointToNormPoint(300, 1000, base, 0, 612, 792)).toBeNull();
+		});
+	});
+
+	describe('hitTestHighlights', () => {
+		it('hits any line of a multi-line highlight', () => {
+			expect(hitTestHighlights({ x: 0.15, y: 0.21 }, [older])?.id).toBe('older');
+			expect(hitTestHighlights({ x: 0.35, y: 0.25 }, [older])?.id).toBe('older');
+		});
+
+		it('misses the gap between lines and the ragged end of a short last line', () => {
+			expect(hitTestHighlights({ x: 0.15, y: 0.23 }, [older])).toBeNull();
+			expect(hitTestHighlights({ x: 0.55, y: 0.25 }, [older])).toBeNull();
+		});
+
+		it('prefers the most recent where highlights overlap, whatever the order', () => {
+			const p = { x: 0.35, y: 0.21 };
+			expect(hitTestHighlights(p, [older, newer])?.id).toBe('newer');
+			expect(hitTestHighlights(p, [newer, older])?.id).toBe('newer');
+		});
+
+		it('pads rects by the tolerance', () => {
+			const justAbove = { x: 0.15, y: 0.2 - 0.0015 };
+			expect(hitTestHighlights(justAbove, [older])?.id).toBe('older');
+			expect(hitTestHighlights(justAbove, [older], 0)).toBeNull();
+		});
 	});
 });
