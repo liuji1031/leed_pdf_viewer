@@ -4,6 +4,7 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import PDFViewer from '$lib/components/PDFViewer.svelte';
+	import ChatPanel from '$lib/components/chat/ChatPanel.svelte';
 	import Toolbar from '$lib/components/Toolbar.svelte';
 	import Footer from '$lib/components/Footer.svelte';
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
@@ -547,7 +548,7 @@
 					<PageThumbnails isVisible={showThumbnails} onPageSelect={handlePageSelect} />
 				{/if}
 
-				<div class="flex-1">
+				<div class="flex-1 min-w-0">
 					<PDFViewer
 						bind:this={pdfViewer}
 						pdfFile={currentFile}
@@ -555,6 +556,9 @@
 						{presentationMode}
 					/>
 				</div>
+				{#if !presentationMode && !focusMode}
+					<ChatPanel onGoToPage={(page) => pdfViewer?.goToPage(page)} />
+				{/if}
 			</div>
 		</div>
 

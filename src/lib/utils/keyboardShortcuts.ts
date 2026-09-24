@@ -1,4 +1,5 @@
 import { setTool, undo, redo } from '$lib/stores/drawingStore';
+import { toggleChatPanel } from '$lib/stores/chatPanelStore';
 
 export interface KeyboardShortcutsParams {
 	pdfViewer: {
@@ -132,6 +133,11 @@ export function keyboardShortcuts(node: Window | HTMLElement, params: KeyboardSh
 				case '8':
 					event.preventDefault();
 					setTool('ask');
+					break;
+				case 'c':
+				case 'C':
+					event.preventDefault();
+					toggleChatPanel();
 					break;
 				case 'h':
 				case 'H':

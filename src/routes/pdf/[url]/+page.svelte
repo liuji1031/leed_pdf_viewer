@@ -7,6 +7,7 @@
 	import { readFile as readFilePlugin } from '@tauri-apps/plugin-fs';
 	import { invoke } from '@tauri-apps/api/core';
 	import PDFViewer from '$lib/components/PDFViewer.svelte';
+	import ChatPanel from '$lib/components/chat/ChatPanel.svelte';
 	import Toolbar from '$lib/components/Toolbar.svelte';
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 	import PageThumbnails from '$lib/components/PageThumbnails.svelte';
@@ -862,9 +863,12 @@
 					<PageThumbnails isVisible={showThumbnails} onPageSelect={handlePageSelect} />
 				{/if}
 
-				<div class="flex-1">
+				<div class="flex-1 min-w-0">
 					<PDFViewer bind:this={pdfViewer} pdfFile={currentFile} {presentationMode} />
 				</div>
+				{#if !presentationMode && !focusMode}
+					<ChatPanel onGoToPage={(page) => pdfViewer?.goToPage(page)} />
+				{/if}
 			</div>
 		</div>
 

@@ -37,6 +37,7 @@
 				{ keys: ['6'], description: 'Switch to sticky note' },
 				{ keys: ['7'], description: 'Switch to select/copy text' },
 				{ keys: ['8'], description: 'Switch to ask about selected text' },
+				{ keys: ['C'], description: 'Show or hide the paper chat' },
 				{ keys: ['S'], description: 'Switch to stamps' }
 			]
 		},
