@@ -84,6 +84,13 @@ export interface ChatSession {
 	summaryAttempts: number;
 	summary?: string;
 	summaryError?: string;
+	/**
+	 * The passage's context (location, surrounding text, citations), frozen when
+	 * the conversation started so every follow-up sends it byte-identically.
+	 */
+	contextSnapshot?: string;
+	/** The parsed block the passage sits in; focuses the outline for huge papers. */
+	focusBlockIdx?: number | null;
 }
 
 export type ChatRole = 'user' | 'assistant' | 'system';
