@@ -1,0 +1,261 @@
+{
+ "pages": [
+  {
+   "page_idx": 0,
+   "blocks": [
+    {
+     "type": "doc_title",
+     "bbox": [
+      0.18,
+      0.091,
+      0.821,
+      0.12
+     ],
+     "level": 1,
+     "content": "Attention Mechanisms for Document Reading"
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.383,
+      0.133,
+      0.617,
+      0.149
+     ],
+     "content": "Ada Example and Grace Sample"
+    },
+    {
+     "type": "paragraph_title",
+     "bbox": [
+      0.464,
+      0.176,
+      0.536,
+      0.193
+     ],
+     "level": 2,
+     "content": "Abstract"
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.154,
+      0.204,
+      0.843,
+      0.266
+     ],
+     "content": "We study scaled dot-product attention as a tool for reading long documents. This paragraph discusses the abstract in enough detail to span several lines of a narrow column, so that a layout parser has to reconstruct reading order across columns rather than following the order in which text was drawn. It adds a second sentence about the abstract for good measure."
+    },
+    {
+     "type": "paragraph_title",
+     "bbox": [
+      0.088,
+      0.285,
+      0.21,
+      0.302
+     ],
+     "level": 2,
+     "content": "1 Introduction"
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.088,
+      0.313,
+      0.477,
+      0.406
+     ],
+     "content": "This paragraph discusses the motivation in enough detail to span several lines of a narrow column, so that a layout parser has to reconstruct reading order across columns rather than following the order in which text was drawn. It adds a second sentence about the motivation for good measure."
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.088,
+      0.415,
+      0.474,
+      0.509
+     ],
+     "content": "This paragraph discusses prior approaches in enough detail to span several lines of a narrow column, so that a layout parser has to reconstruct reading order across columns rather than following the order in which text was drawn. It adds a second sentence about prior approaches for good measure."
+    },
+    {
+     "type": "paragraph_title",
+     "bbox": [
+      0.515,
+      0.285,
+      0.633,
+      0.302
+     ],
+     "level": 2,
+     "content": "2 Background"
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.515,
+      0.313,
+      0.902,
+      0.406
+     ],
+     "content": "This paragraph discusses recurrent models in enough detail to span several lines of a narrow column, so that a layout parser has to reconstruct reading order across columns rather than following the order in which text was drawn. It adds a second sentence about recurrent models for good measure. Earlier work [1] used recurrence throughout."
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.515,
+      0.415,
+      0.894,
+      0.509
+     ],
+     "content": "This paragraph discusses convolutional models in enough detail to span several lines of a narrow column, so that a layout parser has to reconstruct reading order across columns rather than following the order in which text was drawn. It adds a second sentence about convolutional models for good measure."
+    }
+   ]
+  },
+  {
+   "page_idx": 1,
+   "blocks": [
+    {
+     "type": "paragraph_title",
+     "bbox": [
+      0.088,
+      0.075,
+      0.156,
+      0.092
+     ],
+     "level": 2,
+     "content": "3 Model"
+    },
+    {
+     "type": "paragraph_title",
+     "bbox": [
+      0.088,
+      0.102,
+      0.343,
+      0.118
+     ],
+     "level": 2,
+     "content": "3.1 Scaled Dot-Product Attention"
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.088,
+      0.127,
+      0.48,
+      0.172
+     ],
+     "content": "Scaled dot-product attention divides the logits by the square root of the key dimension, as in [2], which keeps the softmax away from regions with vanishing gradients."
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.088,
+      0.182,
+      0.467,
+      0.275
+     ],
+     "content": "This paragraph discusses the attention function in enough detail to span several lines of a narrow column, so that a layout parser has to reconstruct reading order across columns rather than following the order in which text was drawn. It adds a second sentence about the attention function for good measure."
+    },
+    {
+     "type": "table",
+     "bbox": [
+      0.515,
+      0.094,
+      0.912,
+      0.152
+     ],
+     "content": "| Layer | Complexity | Path |\n| --- | --- | --- |\n| Self-attention | O(n^2 d) | O(1) |\n| Recurrent | O(n d^2) | O(n) |",
+     "captions": [
+      {
+       "bbox": [
+        0.515,
+        0.078,
+        0.726,
+        0.091
+       ],
+       "content": "Table 1: Comparison of layer types."
+      }
+     ],
+     "footnotes": [],
+     "image_source": "data:image/jpeg;base64,STRIPPED"
+    },
+    {
+     "type": "paragraph_title",
+     "bbox": [
+      0.088,
+      0.354,
+      0.18,
+      0.371
+     ],
+     "level": 2,
+     "content": "References"
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.515,
+      0.332,
+      0.781,
+      0.345
+     ],
+     "content": "Figure 1: An illustration of attention weights."
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.088,
+      0.383,
+      0.542,
+      0.396
+     ],
+     "content": "[1] A. Author. Learning with recurrent networks. Journal of Examples, 2020."
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.088,
+      0.404,
+      0.569,
+      0.417
+     ],
+     "content": "[2] B. Author. Attention is a useful inductive bias. Proceedings of Samples, 2021."
+    }
+   ]
+  }
+ ],
+ "metadata": {
+  "file_suffix": "pdf",
+  "producer": {
+   "name": "mineru",
+   "version": "4.0.7"
+  },
+  "document": {
+   "created_at": "2026-09-24T02:18:28Z",
+   "modified_at": "2026-09-24T02:18:28Z",
+   "creator_application": "pdf-lib (https://github.com/Hopding/pdf-lib)",
+   "producer_application": "pdf-lib (https://github.com/Hopding/pdf-lib)",
+   "page_count": 2,
+   "page_count_kind": "physical"
+  }
+ },
+ "extensions": {
+  "mineru": {
+   "tier": "flash",
+   "parse_mode": "txt"
+  },
+  "docvortex_layout": {
+   "version": 1,
+   "pages": [
+    {
+     "page_idx": 0,
+     "width_pt": 612.0,
+     "height_pt": 792.0
+    },
+    {
+     "page_idx": 1,
+     "width_pt": 612.0,
+     "height_pt": 792.0
+    }
+   ]
+  }
+ },
+ "is_full_document": true
+}

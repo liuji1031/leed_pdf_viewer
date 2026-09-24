@@ -1,0 +1,71 @@
+{
+ "pages": [
+  {
+   "page_idx": 0,
+   "blocks": [
+    {
+     "type": "text",
+     "bbox": [
+      0.118,
+      0.095,
+      0.497,
+      0.121
+     ],
+     "content": "Scaled Dot-Product Attention"
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.376,
+      0.481,
+      0.523,
+      0.498
+     ],
+     "content": "centre probe text"
+    },
+    {
+     "type": "text",
+     "bbox": [
+      0.621,
+      0.87,
+      0.808,
+      0.89
+     ],
+     "content": "bottom-right probe"
+    }
+   ]
+  }
+ ],
+ "metadata": {
+  "file_suffix": "pdf",
+  "producer": {
+   "name": "mineru",
+   "version": "4.0.7"
+  },
+  "document": {
+   "created_at": "2026-09-22T20:07:25Z",
+   "modified_at": "2026-09-22T20:07:25Z",
+   "creator_application": "pdf-lib (https://github.com/Hopding/pdf-lib)",
+   "producer_application": "pdf-lib (https://github.com/Hopding/pdf-lib)",
+   "page_count": 1,
+   "page_count_kind": "physical"
+  }
+ },
+ "extensions": {
+  "mineru": {
+   "tier": "flash",
+   "parse_mode": "txt"
+  },
+  "docvortex_layout": {
+   "version": 1,
+   "pages": [
+    {
+     "page_idx": 0,
+     "width_pt": 612.0,
+     "height_pt": 792.0
+    }
+   ]
+  }
+ },
+ "is_full_document": true
+}
