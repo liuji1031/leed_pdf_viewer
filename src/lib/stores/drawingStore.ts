@@ -339,6 +339,14 @@ const STORAGE_KEY_PDF_INFO = STORAGE_KEYS.pdfInfo;
 // Track current PDF to associate drawings with specific files
 let currentPDFKey: string | null = null;
 
+/**
+ * The current PDF's key, observable. Mirrors currentPDFKey so features with
+ * their own per-document state (the chat assistant) can follow document
+ * switches without every setCurrentPDF call site having to notify them.
+ */
+const activePDFKeyStore = writable<string | null>(null);
+export const activePDFKey = { subscribe: activePDFKeyStore.subscribe };
+
 // =============================================================================
 // GENERIC ANNOTATION STORE UTILITIES (DRY refactoring)
 // =============================================================================
@@ -467,6 +475,7 @@ export const generatePDFKey = (fileName: string, fileSize: number): string => {
 export const setCurrentPDF = (fileName: string, fileSize: number) => {
 	const pdfKey = generatePDFKey(fileName, fileSize);
 	currentPDFKey = pdfKey;
+	activePDFKeyStore.set(pdfKey);
 
 	// Save current PDF info
 	if (typeof window !== 'undefined') {
@@ -516,6 +525,7 @@ if (typeof window !== 'undefined') {
 		if (savedPDFInfo) {
 			const { pdfKey } = JSON.parse(savedPDFInfo);
 			currentPDFKey = pdfKey;
+			activePDFKeyStore.set(pdfKey);
 			loadDrawingsForCurrentPDF();
 			loadTextAnnotationsForCurrentPDF();
 			loadStickyNotesForCurrentPDF();
