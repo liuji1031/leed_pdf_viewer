@@ -1,5 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import {
+	buildProbePdf,
+	openPdf,
+	PAGE_H,
+	PAGE_W,
+	PROBES,
+	RENDER_TIMEOUT,
+	wheelZoomIn,
+	zoomLabel
+} from './helpers/probePdf';
 
 /**
  * The ask tool's pdf.js text layer must sit exactly over the rendered glyphs at
@@ -9,76 +18,15 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
  * past regression, only after zooming.
  */
 
-const PAGE_W = 612;
-const PAGE_H = 792;
-// Probes spread across the page so a wrong rotation or axis swap moves them visibly.
-const PROBES = [
-	{ text: 'Scaled Dot-Product Attention', x: 72, y: 700, size: 18 },
-	{ text: 'bottom-right probe', x: 380, y: 90, size: 14 },
-	{ text: 'centre probe text', x: 230, y: 400, size: 12 }
-];
 const CONTAINER_TOLERANCE_PX = 2;
 const PROBE_TOLERANCE = 0.012; // fraction of the page, ~7pt on letter
-// Page renders and text-layer rebuilds both wait on the pdf.js worker. With
-// several browser workers in parallel that can exceed the 5s default, which
-// shows up as a correctly rotated but still blank canvas — slow, not wrong.
-const RENDER_TIMEOUT = 20_000;
 
 let fixture: Buffer;
 let probeWidths: number[];
 
 test.beforeAll(async () => {
-	const doc = await PDFDocument.create();
-	const pdfPage = doc.addPage([PAGE_W, PAGE_H]);
-	const font = await doc.embedFont(StandardFonts.Helvetica);
-	for (const p of PROBES) pdfPage.drawText(p.text, { x: p.x, y: p.y, size: p.size, font });
-	probeWidths = PROBES.map((p) => font.widthOfTextAtSize(p.text, p.size));
-	fixture = Buffer.from(await doc.save());
+	({ buffer: fixture, widths: probeWidths } = await buildProbePdf());
 });
-
-async function openFixture(page: Page) {
-	await page.goto('/');
-	await page.waitForLoadState('networkidle');
-	await page
-		.locator('input[type="file"]')
-		.first()
-		.setInputFiles({ name: 'probes.pdf', mimeType: 'application/pdf', buffer: fixture });
-	// Wait until the load flow has finished: the canvas is painted at the fit
-	// scale the page-info label reports. Checking only for a non-trivial width is
-	// not enough — an unrendered <canvas> is 300×150 by default, which would let
-	// the test press keys mid-load, where the load flow then resets rotation/scale.
-	await expect
-		.poll(() =>
-			page.evaluate((pageW) => {
-				const c = document.querySelector('canvas.shadow-lg');
-				const zoom = Number(document.body.innerText.match(/(\d+)%/)?.[1]);
-				if (!c || !zoom) return false;
-				const expected = (pageW * zoom) / 100;
-				return Math.abs(c.getBoundingClientRect().width - expected) < 0.02 * expected;
-			}, PAGE_W),
-			{ timeout: RENDER_TIMEOUT }
-		)
-		.toBe(true);
-}
-
-function zoomLabel(page: Page) {
-	return page.evaluate(() => document.body.innerText.match(/(\d+)%/)?.[1] ?? '');
-}
-
-/**
- * Ctrl+wheel zoom. Deliberately not Ctrl+= : keyboard zoomIn() commits the new
- * scale even when its render was skipped because another was in flight, leaving
- * the canvas stale (a pre-existing race, reproducible without the ask tool).
- * The wheel path retries until it has painted, so it tests the text layer and
- * not that race. It also runs the layer through the CSS-transform phase.
- */
-async function wheelZoomIn(page: Page) {
-	const viewport = page.viewportSize()!;
-	await page.mouse.move(viewport.width / 2, viewport.height / 2);
-	await page.keyboard.down('Control');
-	await page.mouse.wheel(0, -240);
-	await page.keyboard.up('Control');
-}
 
 /**
  * Returns 'ok', or a description of what is misaligned — so a polling failure
@@ -141,7 +89,7 @@ test.describe('Ask tool text layer', () => {
 
 	for (const rotation of [0, 90, 180, 270]) {
 		test(`aligns with the page at ${rotation}° before and after zooming`, async ({ page }) => {
-			await openFixture(page);
+			await openPdf(page, fixture);
 			await page.keyboard.press('8');
 			for (let i = 0; i < rotation / 90; i++) await page.keyboard.press('r');
 
@@ -155,7 +103,7 @@ test.describe('Ask tool text layer', () => {
 	}
 
 	test('is only in the DOM while the ask tool is active', async ({ page }) => {
-		await openFixture(page);
+		await openPdf(page, fixture);
 		const layer = page.locator('.leed-text-layer');
 		await expect(layer).toHaveCount(0);
 

@@ -163,7 +163,19 @@ export function clientRectsToNormRects(
 
 	const [dispW, dispH] = getRotatedDimensions(basePageWidth, basePageHeight, rotation);
 
-	return coalesceLineRects(rects)
+	// A drag that overshoots the page yields rects for whatever else the range
+	// covers; keep only the part of each rect that lies on the page.
+	const onPage = rects
+		.map((r) => {
+			const left = Math.max(r.left, base.left);
+			const top = Math.max(r.top, base.top);
+			const right = Math.min(r.left + r.width, base.left + base.width);
+			const bottom = Math.min(r.top + r.height, base.top + base.height);
+			return { left, top, width: right - left, height: bottom - top };
+		})
+		.filter((r) => r.width > 0 && r.height > 0);
+
+	return coalesceLineRects(onPage)
 		.slice(0, MAX_RECTS)
 		.map((r) => {
 			// Client px -> display-space page units (rotated, scale 1).
@@ -223,6 +235,77 @@ export function normRectToDisplay(
 /** DOM wrapper — untestable in jsdom (all-zero rects), so it does nothing else. */
 export function rangeToClientRects(range: Range): RectLike[] {
 	return Array.from(range.getClientRects());
+}
+
+// ---------------------------------------------------------------------------
+// DOM endpoints -> text positions
+// ---------------------------------------------------------------------------
+
+/** The text layer's spans, in item order, with a reverse lookup. */
+export interface SpanIndex {
+	spans: readonly Element[];
+	itemOf: Map<Node, number>;
+}
+
+export function createSpanIndex(spans: readonly Element[]): SpanIndex {
+	return { spans, itemOf: new Map(spans.map((span, i) => [span, i])) };
+}
+
+/**
+ * Resolve a Range boundary point to a position in the page text.
+ *
+ * Inside a span, the offset is the number of characters before the point. A
+ * point between spans — on the layer container, a marked-content wrapper, a
+ * <br>, or outside the layer altogether — snaps to the nearest span edge: the
+ * start of the next span for a range start, the end of the previous span for a
+ * range end. Returns null when no span lies on the relevant side.
+ */
+export function domPointToTextPosition(
+	node: Node,
+	offset: number,
+	index: SpanIndex,
+	edge: 'start' | 'end'
+): TextPosition | null {
+	const doc = node.ownerDocument ?? (node as Document);
+
+	for (let el: Node | null = node; el; el = el.parentNode) {
+		const item = index.itemOf.get(el);
+		if (item === undefined) continue;
+		const before = doc.createRange();
+		before.setStart(el, 0);
+		before.setEnd(node, offset);
+		return { item, offset: before.toString().length };
+	}
+
+	const point = doc.createRange();
+	point.setStart(node, offset);
+	point.collapse(true);
+	const { spans } = index;
+
+	if (edge === 'start') {
+		// First span starting at or after the point.
+		for (let i = 0; i < spans.length; i++) {
+			if (point.comparePoint(spans[i], 0) >= 0) return { item: i, offset: 0 };
+		}
+		return null;
+	}
+	// Last span starting before the point.
+	for (let i = spans.length - 1; i >= 0; i--) {
+		if (point.comparePoint(spans[i], 0) < 0) {
+			return { item: i, offset: spans[i].textContent?.length ?? 0 };
+		}
+	}
+	return null;
+}
+
+/** Both ends of a Range as text positions, or null if either can't be resolved. */
+export function rangeToTextPositions(
+	range: Range,
+	index: SpanIndex
+): [TextPosition, TextPosition] | null {
+	const start = domPointToTextPosition(range.startContainer, range.startOffset, index, 'start');
+	const end = domPointToTextPosition(range.endContainer, range.endOffset, index, 'end');
+	return start && end ? [start, end] : null;
 }
 
 // ---------------------------------------------------------------------------

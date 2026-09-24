@@ -1,13 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
 	buildPageTextIndex,
 	clientRectsToNormRects,
 	coalesceLineRects,
 	CONTEXT_CHARS,
+	createSpanIndex,
+	domPointToTextPosition,
 	hashText,
 	MAX_RECTS,
 	normRectToDisplay,
 	offsetsToAnchor,
+	rangeToTextPositions,
 	relocate,
 	type NormRect,
 	type RectLike,
@@ -138,6 +141,29 @@ describe('textAnchor geometry', () => {
 				{ left: 10, top: 100, width: 40, height: 12 }
 			];
 			expect(coalesceLineRects(rects)).toEqual(coalesceLineRects([...rects].reverse()));
+		});
+	});
+
+	describe('clipping to the page', () => {
+		const base = { left: 100, top: 100, width: 612, height: 792 };
+
+		it('keeps only the on-page part of a rect that overshoots the edge', () => {
+			const [r] = clientRectsToNormRects(
+				[{ left: 650, top: 200, width: 200, height: 12 }],
+				base,
+				0,
+				612,
+				792
+			);
+			expect(r.x + r.w).toBeCloseTo(1, 4);
+			// Output is rounded to 5 decimals of the page width: ±0.003px at 612.
+			expect(r.w * 612).toBeCloseTo(612 + 100 - 650, 2);
+		});
+
+		it('drops rects entirely off the page, e.g. a toolbar swept into the range', () => {
+			expect(
+				clientRectsToNormRects([{ left: 10, top: 10, width: 80, height: 20 }], base, 0, 612, 792)
+			).toEqual([]);
 		});
 	});
 
@@ -311,5 +337,95 @@ describe('textAnchor relocate', () => {
 		const a = { ...anchorFor(0, 25, 32), charStart: -1, charEnd: -1 };
 		const loc = relocate(a, idx)!;
 		expect(idx.text.slice(loc.start, loc.end)).toBe('softmax');
+	});
+});
+
+describe('textAnchor DOM endpoints', () => {
+	// Mirrors pdf.js text layer output: one span per text item, marked content
+	// wrapped in a non-item span, a <br> after an end-of-line item.
+	let before: HTMLElement;
+	let layer: HTMLElement;
+	let after: HTMLElement;
+	let spans: HTMLSpanElement[];
+	let marked: HTMLSpanElement;
+
+	const span = (text: string) => {
+		const s = document.createElement('span');
+		s.textContent = text;
+		return s;
+	};
+
+	beforeEach(() => {
+		document.body.replaceChildren();
+		before = document.createElement('p');
+		before.textContent = 'toolbar';
+		layer = document.createElement('div');
+		after = document.createElement('p');
+		after.textContent = 'footer';
+
+		spans = [span('Hello '), span('world'), span('again')];
+		marked = document.createElement('span');
+		marked.className = 'markedContent';
+		marked.append(spans[1]);
+		// layer children: [span0, marked(span1), br, span2]
+		layer.append(spans[0], marked, document.createElement('br'), spans[2]);
+		document.body.append(before, layer, after);
+	});
+
+	const index = () => createSpanIndex(spans);
+
+	it('counts characters before a point inside a span text node', () => {
+		expect(domPointToTextPosition(spans[1].firstChild!, 3, index(), 'start')).toEqual({ item: 1, offset: 3 });
+	});
+
+	it('handles an element-boundary point on the span itself', () => {
+		expect(domPointToTextPosition(spans[1], 0, index(), 'start')).toEqual({ item: 1, offset: 0 });
+		expect(domPointToTextPosition(spans[1], 1, index(), 'end')).toEqual({ item: 1, offset: 5 });
+	});
+
+	it('snaps a point between spans to the next start or the previous end', () => {
+		// (layer, 1) sits between span0 and the marked-content wrapper.
+		expect(domPointToTextPosition(layer, 1, index(), 'start')).toEqual({ item: 1, offset: 0 });
+		expect(domPointToTextPosition(layer, 1, index(), 'end')).toEqual({ item: 0, offset: 6 });
+		// (layer, 3) sits between the <br> and span2.
+		expect(domPointToTextPosition(layer, 3, index(), 'start')).toEqual({ item: 2, offset: 0 });
+		expect(domPointToTextPosition(layer, 3, index(), 'end')).toEqual({ item: 1, offset: 5 });
+	});
+
+	it('looks through a marked-content wrapper that is not itself an item', () => {
+		expect(domPointToTextPosition(marked, 0, index(), 'start')).toEqual({ item: 1, offset: 0 });
+	});
+
+	it('snaps points outside the layer to its first or last span', () => {
+		expect(domPointToTextPosition(before.firstChild!, 2, index(), 'start')).toEqual({ item: 0, offset: 0 });
+		expect(domPointToTextPosition(after.firstChild!, 2, index(), 'end')).toEqual({ item: 2, offset: 5 });
+	});
+
+	it('returns null when no span lies on the relevant side', () => {
+		expect(domPointToTextPosition(before.firstChild!, 2, index(), 'end')).toBeNull();
+		expect(domPointToTextPosition(after.firstChild!, 2, index(), 'start')).toBeNull();
+	});
+
+	it('turns a real Range into an anchor end to end', () => {
+		const range = document.createRange();
+		range.setStart(spans[0].firstChild!, 3);
+		range.setEnd(spans[2].firstChild!, 3);
+
+		const positions = rangeToTextPositions(range, index())!;
+		const idx = buildPageTextIndex(2, [{ str: 'Hello ' }, { str: 'world', hasEOL: true }, { str: 'again' }]);
+		const anchor = offsetsToAnchor(idx, ...positions)!;
+		expect(anchor.text).toBe('lo world aga');
+		expect(anchor.itemStart).toBe(0);
+		expect(anchor.itemEnd).toBe(2);
+	});
+
+	it('resolves a range that overshoots the layer at both ends', () => {
+		const range = document.createRange();
+		range.setStart(before.firstChild!, 1);
+		range.setEnd(after.firstChild!, 1);
+		expect(rangeToTextPositions(range, index())).toEqual([
+			{ item: 0, offset: 0 },
+			{ item: 2, offset: 5 }
+		]);
 	});
 });

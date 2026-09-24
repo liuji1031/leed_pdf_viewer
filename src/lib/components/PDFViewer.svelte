@@ -44,6 +44,7 @@
 	import ImageOverlay from './ImageOverlay.svelte';
 	import LinkOverlay from './LinkOverlay.svelte';
 	import PDFTextLayer from './PDFTextLayer.svelte';
+	import AskSelectionChip from './AskSelectionChip.svelte';
 	import TextSelectionOverlay from './TextSelectionOverlay.svelte';
 	import { TOOLBAR_HEIGHT } from '$lib/constants';
 	import { setWindowTitle } from '$lib/utils/tauriUtils';
@@ -3326,6 +3327,15 @@
 					pageNumber={$pdfState.currentPage}
 					scale={$pdfState.scale}
 					rotation={$pdfState.rotation as RotationAngle}
+				/>
+				<AskSelectionChip
+					pageNumber={$pdfState.currentPage}
+					scale={$pdfState.scale}
+					rotation={$pdfState.rotation as RotationAngle}
+					{basePageWidth}
+					{basePageHeight}
+					canvasWidth={canvasDisplayWidth}
+					canvasHeight={canvasDisplayHeight}
 				/>
 			{/if}
 		</div>
