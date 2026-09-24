@@ -146,6 +146,37 @@ test.describe('Paper chat', () => {
 		await expect(assistant(page)).toHaveCount(2);
 	});
 
+	test('double-clicking a highlight reopens its conversation, in any tool', async ({ page }) => {
+		await mockParser(page);
+		await mockOpenRouter(page);
+		await page.addInitScript(() =>
+			localStorage.setItem('leedpdf_chat_settings', JSON.stringify({ apiKey: 'sk-or-v1-test' }))
+		);
+		await openPdf(page, fixture);
+		await page.keyboard.press('c');
+		await expect(page.getByTestId('parse-status')).toHaveAttribute('data-status', 'done', { timeout: 20_000 });
+
+		await selectTitle(page);
+		await page.getByTestId('ask-selection-chip').click();
+		await page.getByTestId('chat-input').fill('Why is it scaled?');
+		await page.keyboard.press('Enter');
+		await expect(assistant(page).first()).toHaveAttribute('data-status', 'complete');
+
+		for (const tool of ['8', '1']) {
+			await page.keyboard.press(tool);
+			// Leave the conversation, then double-click its highlight.
+			await page.getByRole('button', { name: 'All conversations' }).click();
+			await expect(page.getByTestId('chat-session-list')).toBeVisible();
+			const hl = (await page.locator('.chat-highlight-rect').first().boundingBox())!;
+			await page.mouse.dblclick(hl.x + hl.width / 2, hl.y + hl.height / 2);
+
+			await expect(page.getByTestId('chat-quote')).toContainText(TITLE);
+			await expect(page.getByTestId('chat-message-user')).toHaveText(['Why is it scaled?']);
+			// The word the double-click selected doesn't become a new question.
+			await expect(page.getByTestId('ask-selection-chip')).toBeHidden();
+		}
+	});
+
 	test('explains what is missing before a question can be asked', async ({ page }) => {
 		await mockParser(page, { configured: false });
 		await openPdf(page, fixture);

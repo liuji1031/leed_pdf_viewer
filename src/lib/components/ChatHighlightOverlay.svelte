@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { currentPageChatHighlights, type ChatHighlight } from '$lib/stores/drawingStore';
+	import { activeSessionId, askRequest, clearPendingSelection } from '$lib/stores/chatStore';
+	import { chatPanelOpen } from '$lib/stores/chatPanelStore';
 	import {
 		clientPointToNormPoint,
 		hitTestHighlights,
@@ -88,6 +90,26 @@
 		}, HOVER_DELAY_MS);
 	}
 
+	/** Double-clicking a highlight reopens its conversation. */
+	function onDoubleClick(event: MouseEvent) {
+		const page = overlayEl?.getBoundingClientRect();
+		const point =
+			page &&
+			clientPointToNormPoint(event.clientX, event.clientY, page, rotation, basePageWidth, basePageHeight);
+		const hit = point ? hitTestHighlights(point, $currentPageChatHighlights) : null;
+		if (!hit) return;
+		askRequest.set(null);
+		activeSessionId.set(hit.sessionId);
+		chatPanelOpen.set(true);
+		// In ask mode the double-click also selected a word, and the selection
+		// capture (queued at pointerup, before this event) will offer to ask about
+		// it. Undo that on the next frame, after the capture has run.
+		requestAnimationFrame(() => {
+			clearPendingSelection();
+			window.getSelection()?.removeAllRanges();
+		});
+	}
+
 	function onMouseLeave() {
 		clearTimeout(hoverTimer);
 		hovered = null;
@@ -107,12 +129,14 @@
 		wrapper = overlayEl.parentElement;
 		wrapper?.addEventListener('mousemove', onMouseMove, { passive: true });
 		wrapper?.addEventListener('mouseleave', onMouseLeave, { passive: true });
+		wrapper?.addEventListener('dblclick', onDoubleClick, { passive: true });
 	});
 
 	onDestroy(() => {
 		clearTimeout(hoverTimer);
 		wrapper?.removeEventListener('mousemove', onMouseMove);
 		wrapper?.removeEventListener('mouseleave', onMouseLeave);
+		wrapper?.removeEventListener('dblclick', onDoubleClick);
 	});
 </script>
 
