@@ -270,8 +270,11 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 		setMessage(current);
 		await deps.storage.putMessage(current);
 
+		// Re-read: the copy taken when the question was sent is stale by now — a
+		// summary may have been written meanwhile, and must not be overwritten.
 		const messageCount = messagesOf(sessionId).length;
-		await saveSession({ ...session, messageCount, updatedAt: now(), model: settings.chatModel });
+		const latest = get(chatSessions).find((s) => s.id === sessionId) ?? session;
+		await saveSession({ ...latest, messageCount, updatedAt: now(), model: settings.chatModel });
 		const highlight = deps.highlights.all().find((h) => h.id === session.highlightId);
 		if (highlight) deps.highlights.update({ ...highlight, messageCount });
 

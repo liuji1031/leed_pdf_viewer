@@ -15,6 +15,8 @@ const ANSWERS = [
 	['By the square root of the key dimension.']
 ];
 
+const SUMMARY = 'Asked why attention logits are scaled; they are divided by √dk to keep softmax gradients healthy.';
+
 let fixture: Buffer;
 
 test.beforeAll(async () => {
@@ -59,8 +61,11 @@ async function mockOpenRouter(page: Page) {
 	const requests: { messages: { role: string; content: unknown }[]; model: string }[] = [];
 	await page.route('https://openrouter.ai/api/v1/chat/completions', async (route) => {
 		const body = JSON.parse(route.request().postData() ?? '{}');
-		requests.push(body);
-		const chunks = ANSWERS[Math.min(requests.length - 1, ANSWERS.length - 1)];
+		const isSummary = String(body.messages?.[0]?.content ?? '').startsWith('In at most 25 words');
+		if (!isSummary) requests.push(body);
+		const chunks = isSummary
+			? [SUMMARY]
+			: ANSWERS[Math.min(requests.length - 1, ANSWERS.length - 1)];
 		const sse =
 			chunks.map((text) => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`).join('') +
 			'data: [DONE]\n\n';
@@ -175,6 +180,39 @@ test.describe('Paper chat', () => {
 			// The word the double-click selected doesn't become a new question.
 			await expect(page.getByTestId('ask-selection-chip')).toBeHidden();
 		}
+	});
+
+	test('summarises a conversation once a second passage is selected, for the hover card', async ({
+		page
+	}) => {
+		await mockParser(page);
+		await mockOpenRouter(page);
+		await page.addInitScript(() =>
+			localStorage.setItem('leedpdf_chat_settings', JSON.stringify({ apiKey: 'sk-or-v1-test' }))
+		);
+		await openPdf(page, fixture);
+		await page.keyboard.press('c');
+		await expect(page.getByTestId('parse-status')).toHaveAttribute('data-status', 'done', { timeout: 20_000 });
+
+		await selectTitle(page);
+		await page.getByTestId('ask-selection-chip').click();
+		await page.getByTestId('chat-input').fill('Why is it scaled?');
+		await page.keyboard.press('Enter');
+		await expect(assistant(page).first()).toHaveAttribute('data-status', 'complete');
+
+		// A second selection, well before the idle minute is up.
+		const other = (await page.locator('.leed-text-layer span', { hasText: PROBES[2].text }).first().boundingBox())!;
+		await page.mouse.move(other.x + 1, other.y + other.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(other.x + other.width - 1, other.y + other.height / 2, { steps: 8 });
+		await page.mouse.up();
+
+		// Hovering the first highlight shows the summary in the left margin.
+		await page.getByRole('button', { name: 'All conversations' }).click();
+		await expect(page.getByTestId('chat-session-item').first()).toContainText('√dk', { timeout: 15_000 });
+		const hl = (await page.locator('.chat-highlight-rect').first().boundingBox())!;
+		await page.mouse.move(hl.x + hl.width / 2, hl.y + hl.height / 2);
+		await expect(page.getByTestId('chat-highlight-card')).toContainText(SUMMARY);
 	});
 
 	test('explains what is missing before a question can be asked', async ({ page }) => {
