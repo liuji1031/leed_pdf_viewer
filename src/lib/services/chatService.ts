@@ -4,6 +4,7 @@ import {
 	activePDFKey,
 	addChatHighlight,
 	chatHighlights,
+	deleteChatHighlight,
 	updateChatHighlight
 } from '$lib/stores/drawingStore';
 import { chatLoadState, chatSessions, pendingSelection } from '$lib/stores/chatStore';
@@ -25,7 +26,8 @@ export const chat = createChatController({
 	highlights: {
 		all: () => [...get(chatHighlights).values()].flat(),
 		add: addChatHighlight,
-		update: updateChatHighlight
+		update: updateChatHighlight,
+		remove: deleteChatHighlight
 	}
 });
 

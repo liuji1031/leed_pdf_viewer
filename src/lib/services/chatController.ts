@@ -34,7 +34,7 @@ export class ChatError extends Error {
 }
 
 export interface ChatControllerDeps {
-	storage: Pick<ChatStorageManager, 'putSession' | 'putMessage' | 'getSession'>;
+	storage: Pick<ChatStorageManager, 'putSession' | 'putMessage' | 'getSession' | 'deleteSession' | 'deleteByPdfKey'>;
 	stream: (req: StreamRequest) => AsyncGenerator<StreamEvent>;
 	getSettings: () => ChatSettings;
 	/** The open document's key and parsed content (null until parsed). */
@@ -43,6 +43,7 @@ export interface ChatControllerDeps {
 		all(): ChatHighlight[];
 		add(h: ChatHighlight): void;
 		update(h: ChatHighlight): void;
+		remove(id: string, pageNumber: number): void;
 	};
 	now?: () => number;
 	newId?: () => string;
@@ -65,6 +66,10 @@ export interface ChatController {
 	startConversation(selection: PendingSelection, question: string, options?: SendOptions): Promise<string>;
 	sendMessage(sessionId: string, question: string, options?: SendOptions): Promise<void>;
 	stop(sessionId: string): void;
+	/** Delete a conversation and its highlight. */
+	deleteConversation(sessionId: string): Promise<void>;
+	/** Delete every conversation and highlight for the open document. */
+	clearDocument(): Promise<void>;
 }
 
 const TITLE_MAX = 60;
@@ -285,11 +290,43 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 		controllers.get(sessionId)?.abort();
 	}
 
+	function forget(sessionIds: Set<string>) {
+		chatSessions.update((list) => list.filter((s) => !sessionIds.has(s.id)));
+		chatMessages.update((map) => {
+			const next = new Map(map);
+			for (const id of sessionIds) next.delete(id);
+			return next;
+		});
+		if (sessionIds.has(get(activeSessionId) ?? '')) activeSessionId.set(null);
+		for (const h of deps.highlights.all()) {
+			if (sessionIds.has(h.sessionId)) deps.highlights.remove(h.id, h.pageNumber);
+		}
+	}
+
+	async function deleteConversation(sessionId: string) {
+		stop(sessionId);
+		forget(new Set([sessionId]));
+		await deps.storage.deleteSession(sessionId);
+	}
+
+	async function clearDocument() {
+		const open = deps.getDocument();
+		if (!open) return;
+		const ids = new Set(get(chatSessions).filter((s) => s.pdfKey === open.pdfKey).map((s) => s.id));
+		for (const id of ids) stop(id);
+		// Highlights whose sessions never loaded (or were lost) go too.
+		for (const h of deps.highlights.all()) ids.add(h.sessionId);
+		forget(ids);
+		await deps.storage.deleteByPdfKey(open.pdfKey);
+	}
+
 	return {
 		generating: { subscribe: generating.subscribe },
 		answerCompleted: { subscribe: answerCompleted.subscribe },
 		startConversation,
 		sendMessage,
-		stop
+		stop,
+		deleteConversation,
+		clearDocument
 	};
 }

@@ -14,6 +14,7 @@
 		MessagesSquare,
 		RefreshCw,
 		Settings,
+		Trash2,
 		X
 	} from 'lucide-svelte';
 	import {
@@ -153,6 +154,21 @@
 		askRequest.set(null);
 	}
 
+	// Deleting takes two clicks: the first arms it for a few seconds.
+	let confirming: 'session' | 'all' | null = null;
+	let confirmTimer: ReturnType<typeof setTimeout> | undefined;
+	function confirmThen(kind: 'session' | 'all', action: () => Promise<void>) {
+		clearTimeout(confirmTimer);
+		if (confirming === kind) {
+			confirming = null;
+			void action();
+			return;
+		}
+		confirming = kind;
+		confirmTimer = setTimeout(() => (confirming = null), 3000);
+	}
+	onDestroy(() => clearTimeout(confirmTimer));
+
 	function parseNow() {
 		if ($openDocument) parseQueue.request($openDocument, { manual: true });
 	}
@@ -248,6 +264,17 @@
 			<h2 class="flex-1 truncate text-sm font-semibold text-charcoal dark:text-gray-100">
 				{activeSession ? activeSession.title : pendingAsk ? 'New question' : 'Paper chat'}
 			</h2>
+			{#if activeSession}
+				<button
+					class="flex items-center gap-1 rounded-lg p-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 {confirming === 'session' ? 'text-red-600 dark:text-red-400' : 'text-slate dark:text-gray-300'}"
+					on:click={() => activeSession && confirmThen('session', () => chat.deleteConversation(activeSession.id))}
+					aria-label={confirming === 'session' ? 'Confirm: delete this conversation and its highlight' : 'Delete conversation'}
+					data-testid="chat-delete-session"
+				>
+					<Trash2 size={16} />
+					{#if confirming === 'session'}<span>Delete?</span>{/if}
+				</button>
+			{/if}
 			<button class="rounded-lg p-1 text-slate hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" on:click={() => chatSettingsOpen.set(true)} aria-label="Chat settings" data-testid="chat-settings-button">
 				<Settings size={16} />
 			</button>
@@ -356,12 +383,25 @@
 							</span>
 						</button>
 					{:else}
-						<div class="p-4 text-sm text-slate dark:text-gray-400">
+						<div class="p-4 text-sm text-slate dark:text-gray-400" data-testid="chat-empty">
 							<p class="mb-1 font-medium text-charcoal dark:text-gray-200">No conversations yet</p>
 							<p>Choose the ask tool (<kbd class="rounded bg-gray-100 px-1 dark:bg-gray-700">8</kbd>), select a passage, and click <em>Ask about…</em>.</p>
 						</div>
 					{/each}
 				</div>
+				{#if $chatSessions.length}
+					<div class="border-t border-gray-100 px-3 py-2 text-right dark:border-gray-700">
+						<button
+							class="text-xs hover:underline {confirming === 'all' ? 'font-medium text-red-600 dark:text-red-400' : 'text-slate dark:text-gray-400'}"
+							on:click={() => confirmThen('all', () => chat.clearDocument())}
+							data-testid="chat-clear-all"
+						>
+							{confirming === 'all'
+								? `Click again to delete ${$chatSessions.length} conversation${$chatSessions.length === 1 ? '' : 's'} and their highlights`
+								: 'Clear all chats for this paper'}
+						</button>
+					</div>
+				{/if}
 			{/if}
 		</div>
 	</aside>

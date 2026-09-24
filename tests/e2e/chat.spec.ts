@@ -215,6 +215,35 @@ test.describe('Paper chat', () => {
 		await expect(page.getByTestId('chat-highlight-card')).toContainText(SUMMARY);
 	});
 
+	test('deletes a conversation with its highlight, and it stays deleted', async ({ page }) => {
+		await mockParser(page);
+		await mockOpenRouter(page);
+		await page.addInitScript(() =>
+			localStorage.setItem('leedpdf_chat_settings', JSON.stringify({ apiKey: 'sk-or-v1-test' }))
+		);
+		await openPdf(page, fixture);
+		await page.keyboard.press('c');
+		await expect(page.getByTestId('parse-status')).toHaveAttribute('data-status', 'done', { timeout: 20_000 });
+		await selectTitle(page);
+		await page.getByTestId('ask-selection-chip').click();
+		await page.getByTestId('chat-input').fill('Why is it scaled?');
+		await page.keyboard.press('Enter');
+		await expect(assistant(page).first()).toHaveAttribute('data-status', 'complete');
+		await expect(page.locator('.chat-highlight-rect')).toHaveCount(1);
+
+		// First click only asks; the second deletes.
+		await page.getByTestId('chat-delete-session').click();
+		await expect(page.locator('.chat-highlight-rect')).toHaveCount(1);
+		await page.getByTestId('chat-delete-session').click();
+
+		await expect(page.locator('.chat-highlight-rect')).toHaveCount(0);
+		await expect(page.getByTestId('chat-empty')).toBeVisible();
+
+		await page.reload();
+		await openPdf(page, fixture);
+		await expect(page.locator('.chat-highlight-rect')).toHaveCount(0);
+	});
+
 	test('explains what is missing before a question can be asked', async ({ page }) => {
 		await mockParser(page, { configured: false });
 		await openPdf(page, fixture);

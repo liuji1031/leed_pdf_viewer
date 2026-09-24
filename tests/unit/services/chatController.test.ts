@@ -77,7 +77,8 @@ function controller(stream: (r: StreamRequest) => AsyncGenerator<StreamEvent>, e
 		highlights: {
 			all: () => highlights,
 			add: (h) => highlights.push(h),
-			update: (h) => (highlights = highlights.map((x) => (x.id === h.id ? h : x)))
+			update: (h) => (highlights = highlights.map((x) => (x.id === h.id ? h : x))),
+			remove: (id) => (highlights = highlights.filter((x) => x.id !== id))
 		},
 		newId: () => `id-${++ids}`,
 		...extra
@@ -268,5 +269,47 @@ describe('streaming and failures', () => {
 		expect((error as ChatError).kind).toBe('busy');
 		c.stop(id);
 		await run;
+	});
+});
+
+describe('deleting', () => {
+	it('deletes one conversation, its messages and its highlight, leaving others alone', async () => {
+		const { stream } = scriptedStream([{ chunks: ['a'] }]);
+		const c = controller(stream);
+		const keep = await c.startConversation(selection, 'keep me');
+		const drop = await c.startConversation(selection, 'drop me');
+
+		await c.deleteConversation(drop);
+
+		expect(get(chatSessions).map((s) => s.id)).toEqual([keep]);
+		expect(get(chatMessages).has(drop)).toBe(false);
+		expect(get(activeSessionId)).toBeNull();
+		expect(highlights.map((h) => h.sessionId)).toEqual([keep]);
+		expect(await storage.getSession(drop)).toBeNull();
+		expect(await storage.listMessages(drop)).toEqual([]);
+		expect(await storage.getSession(keep)).not.toBeNull();
+	});
+
+	it('stops an answer that is still streaming', async () => {
+		const { stream } = scriptedStream([{ chunks: ['a', 'b'], hangAfter: 1 }]);
+		const c = controller(stream);
+		const run = c.startConversation(selection, 'q');
+		await vi.waitFor(() => expect(get(c.generating).size).toBe(1));
+		await c.deleteConversation([...get(c.generating)][0]);
+		await run;
+		expect(get(c.generating).size).toBe(0);
+	});
+
+	it('clears every conversation and highlight for the open document', async () => {
+		const { stream } = scriptedStream([{ chunks: ['a'] }]);
+		const c = controller(stream);
+		await c.startConversation(selection, 'one');
+		await c.startConversation(selection, 'two');
+
+		await c.clearDocument();
+
+		expect(get(chatSessions)).toEqual([]);
+		expect(highlights).toEqual([]);
+		expect(await storage.listSessions('paper.pdf_1')).toEqual([]);
 	});
 });
