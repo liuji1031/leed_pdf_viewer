@@ -23,9 +23,6 @@ export default defineConfig({
 		fs: {
 			allow: ['..', 'node_modules/pdfjs-dist']
 		},
-		headers: {
-			'Cache-Control': 'public, max-age=31536000',
-		},
 		hmr: {
 			// The HMR websocket address is resolved by the *browser*, so in a
 			// container it must be the host's address, not the container's.
