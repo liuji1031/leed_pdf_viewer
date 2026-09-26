@@ -4,7 +4,8 @@
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile prod up -d --build
 #
 # Installs MinerU with its model-based extras and serves the `standard` tier
-# (the app picks the best tier the server offers). Device settings follow
+# (the app picks the best tier the server offers); MINERU_TIER=basic skips the
+# VLM for small or shared GPUs. Device settings follow
 # upstream's own GPU compose (docker/compose.yaml in the MinerU repo).
 # Not tested on this project's CI, which has no GPU.
 services:
@@ -12,7 +13,16 @@ services:
     build:
       args:
         EXTRAS: full
-    command: ["api-server", "--host", "0.0.0.0", "--port", "8000", "--tier", "standard"]
+    command: ["api-server", "--host", "0.0.0.0", "--port", "8000", "--tier", "${MINERU_TIER:-standard}"]
+    environment:
+      # On cards under 8 GB MinerU asks vLLM for 6 GB and the engine fails to
+      # start. Pretending the card is N GB makes it request 6/N of it instead:
+      # 8 (75%) works on a 6 GB card; 10 (60%) leaves no room for the KV cache.
+      # Leave unset on larger GPUs.
+      MINERU_VIRTUAL_VRAM_SIZE:
+      # FlashInfer's sampler JIT-compiles with nvcc, which the pip CUDA wheels
+      # don't ship; vLLM's PyTorch sampler needs no compiler.
+      VLLM_USE_FLASHINFER_SAMPLER: "0"
     ipc: host
     ulimits:
       memlock: -1

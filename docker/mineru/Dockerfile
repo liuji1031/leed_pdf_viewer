@@ -10,9 +10,20 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir "mineru${EXTRAS:+[$EXTRAS]}${MINERU_VERSION}"
+# vLLM's Triton kernels are compiled at engine start-up, so the model-based
+# extras need a C toolchain; the flash-only image doesn't.
+RUN if [ -n "$EXTRAS" ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends build-essential \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
 # Model weights (non-flash tiers) are cached here — mount a volume so they are
 # downloaded once, not on every container rebuild.
-ENV HF_HOME=/models MODELSCOPE_CACHE=/models
+ENV HF_HOME=/models MODELSCOPE_CACHE=/models \
+    # MinerU 4 keeps its weights under MINERU_HOME (default ~/.mineru), not HF_HOME.
+    MINERU_HOME=/models/mineru \
+    # vLLM's torch.compile cache: makes GPU restarts skip most of the warm-up.
+    VLLM_CACHE_ROOT=/models/vllm
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s \
     CMD curl -fsS http://localhost:8000/v1/health || exit 1
