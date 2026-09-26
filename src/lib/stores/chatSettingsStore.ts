@@ -1,16 +1,11 @@
 import { writable } from 'svelte/store';
 
 /**
- * Chat assistant settings, kept in this browser's localStorage. The API key is
- * the user's own and is sent only to the configured endpoint — there is no
- * server-side proxy, so it works the same in the web and desktop builds.
+ * Chat assistant settings, kept in this browser's localStorage. The OpenRouter
+ * key and models are not here: the /api/openrouter relay takes them from the
+ * server's OPENROUTER_API_KEY, OPENROUTER_MODEL and OPENROUTER_SUMMARY_MODEL.
  */
 export interface ChatSettings {
-	apiKey: string;
-	endpoint: string;
-	chatModel: string;
-	/** Defaults to the chat model when empty; a cheaper model saves money. */
-	summaryModel: string;
 	/** Idle time after an answer before its conversation is summarised. */
 	summaryIdleMs: number;
 	autoSummarize: boolean;
@@ -29,10 +24,6 @@ const PARSER_TIERS = ['auto', 'flash', 'basic', 'standard', 'advanced'];
 export const CHAT_SETTINGS_KEY = 'leedpdf_chat_settings';
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
-	apiKey: '',
-	endpoint: 'https://openrouter.ai/api/v1',
-	chatModel: 'anthropic/claude-sonnet-5',
-	summaryModel: '',
 	summaryIdleMs: 60_000,
 	autoSummarize: true,
 	parserEndpoint: '/api/mineru',
@@ -41,7 +32,11 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
 	autoParse: true
 };
 
-/** Merge stored values over the defaults, ignoring anything malformed. */
+/**
+ * Merge stored values over the defaults, ignoring anything malformed. Keys
+ * this version no longer has (an old browser-side apiKey or summaryModel) are dropped, and
+ * disappear from storage on the next save.
+ */
 export function parseChatSettings(raw: string | null): ChatSettings {
 	if (!raw) return { ...DEFAULT_CHAT_SETTINGS };
 	try {
@@ -50,10 +45,6 @@ export function parseChatSettings(raw: string | null): ChatSettings {
 			(valid(stored[key]) ? stored[key] : DEFAULT_CHAT_SETTINGS[key]) as ChatSettings[K];
 		const isString = (v: unknown) => typeof v === 'string';
 		return {
-			apiKey: pick('apiKey', isString),
-			endpoint: pick('endpoint', (v) => isString(v) && (v as string).trim() !== ''),
-			chatModel: pick('chatModel', (v) => isString(v) && (v as string).trim() !== ''),
-			summaryModel: pick('summaryModel', isString),
 			summaryIdleMs: pick('summaryIdleMs', (v) => typeof v === 'number' && v >= 5_000),
 			autoSummarize: pick('autoSummarize', (v) => typeof v === 'boolean'),
 			parserEndpoint: pick('parserEndpoint', (v) => isString(v) && (v as string).trim() !== ''),
@@ -88,9 +79,4 @@ chatSettings.subscribe((settings) => {
 
 export function updateChatSettings(patch: Partial<ChatSettings>) {
 	chatSettings.update((s) => ({ ...s, ...patch }));
-}
-
-/** The model to summarise with: the summary model if set, else the chat model. */
-export function summaryModelOf(settings: ChatSettings): string {
-	return settings.summaryModel.trim() || settings.chatModel;
 }

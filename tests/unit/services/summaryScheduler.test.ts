@@ -39,7 +39,7 @@ function harness(opts: { settings?: Partial<ChatSettings>; fail?: boolean; hang?
 	const messages = new Map<string, ChatMessage[]>();
 	let highlights: ChatHighlight[] = [];
 	const calls: StreamRequest[] = [];
-	const settings: ChatSettings = { ...DEFAULT_CHAT_SETTINGS, apiKey: 'k', summaryIdleMs: IDLE, ...opts.settings };
+	const settings: ChatSettings = { ...DEFAULT_CHAT_SETTINGS, summaryIdleMs: IDLE, ...opts.settings };
 
 	const stream = async function* (req: StreamRequest): AsyncGenerator<StreamEvent> {
 		calls.push(req);
@@ -147,14 +147,15 @@ describe('summary scheduling', () => {
 		expect(h.calls).toHaveLength(1);
 	});
 
-	it('uses a short, clipped prompt with the summary model', async () => {
-		const h = harness({ settings: { summaryModel: 'anthropic/claude-haiku-4.5' } });
+	it("uses a short, clipped prompt and leaves the model to the server's summary route", async () => {
+		const h = harness();
 		h.add(session('a'));
 		await h.scheduler.onAnswerComplete('a');
 		h.scheduler.onNewSelection();
 		await h.scheduler.idle();
 		const req = h.calls[0];
-		expect(req).toMatchObject({ model: 'anthropic/claude-haiku-4.5', maxTokens: 120, temperature: 0.2 });
+		expect(req).toMatchObject({ purpose: 'summary', maxTokens: 120, temperature: 0.2 });
+		expect(req).not.toHaveProperty('model');
 		expect(req.messages[0]).toEqual({ role: 'system', content: SUMMARY_PROMPT });
 		expect(req.messages[1].content).toContain('Passage: "passage a"');
 		expect(req.messages[1].content).toContain('User: Why scale?');

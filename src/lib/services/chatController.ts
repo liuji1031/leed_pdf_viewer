@@ -1,6 +1,5 @@
 import { get, writable, type Readable } from 'svelte/store';
 import type { ChatHighlight } from '$lib/stores/drawingStore';
-import type { ChatSettings } from '$lib/stores/chatSettingsStore';
 import {
 	activeSessionId,
 	chatMessages,
@@ -21,7 +20,7 @@ import { OpenRouterError, type StreamEvent, type StreamRequest } from './openRou
  * not when "Ask" is clicked — clicking and walking away leaves nothing behind.
  */
 
-export type ChatErrorKind = 'no_api_key' | 'not_parsed' | 'no_document' | 'unknown_session' | 'busy';
+export type ChatErrorKind = 'not_parsed' | 'no_document' | 'unknown_session' | 'busy';
 
 export class ChatError extends Error {
 	constructor(
@@ -36,7 +35,6 @@ export class ChatError extends Error {
 export interface ChatControllerDeps {
 	storage: Pick<ChatStorageManager, 'putSession' | 'putMessage' | 'getSession' | 'deleteSession' | 'deleteByPdfKey'>;
 	stream: (req: StreamRequest) => AsyncGenerator<StreamEvent>;
-	getSettings: () => ChatSettings;
 	/** The open document's key and parsed content (null until parsed). */
 	getDocument: () => { pdfKey: string; parsed: ParsedDocument | null } | null;
 	highlights: {
@@ -77,8 +75,10 @@ const TITLE_MAX = 60;
 function friendlyError(error: unknown): string {
 	if (error instanceof OpenRouterError) {
 		switch (error.kind) {
+			case 'not_configured':
+				return `Chat isn’t set up on the server: ${error.message}`;
 			case 'auth':
-				return 'OpenRouter rejected the API key. Check it in chat settings.';
+				return 'OpenRouter rejected the API key. Check OPENROUTER_API_KEY in .env.';
 			case 'credits':
 				return 'Your OpenRouter account is out of credits.';
 			case 'rate_limit':
@@ -124,21 +124,17 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 		await deps.storage.putSession(session);
 	}
 
-	function requireReady(): { pdfKey: string; parsed: ParsedDocument; settings: ChatSettings } {
-		const settings = deps.getSettings();
-		if (!settings.apiKey.trim()) {
-			throw new ChatError('no_api_key', 'Add your OpenRouter API key in chat settings to ask questions.');
-		}
+	function requireReady(): { pdfKey: string; parsed: ParsedDocument } {
 		const open = deps.getDocument();
 		if (!open) throw new ChatError('no_document', 'Open a document first.');
 		if (!open.parsed) {
 			throw new ChatError('not_parsed', 'This document is still being prepared. Try again once parsing finishes.');
 		}
-		return { pdfKey: open.pdfKey, parsed: open.parsed, settings };
+		return { pdfKey: open.pdfKey, parsed: open.parsed };
 	}
 
 	async function startConversation(selection: PendingSelection, question: string, options: SendOptions = {}) {
-		const { pdfKey, parsed, settings } = requireReady();
+		const { pdfKey, parsed } = requireReady();
 		const context = buildSessionContext(parsed, selection);
 		const createdAt = now();
 		const sessionId = newId();
@@ -167,7 +163,7 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 			title: quotedText.length > TITLE_MAX ? `${quotedText.slice(0, TITLE_MAX).trimEnd()}…` : quotedText,
 			createdAt,
 			updatedAt: createdAt,
-			model: settings.chatModel,
+			model: '', // filled in from the first answer
 			messageCount: 0,
 			summaryState: 'idle',
 			summaryAttempts: 0,
@@ -183,7 +179,7 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 	}
 
 	async function sendMessage(sessionId: string, question: string, options: SendOptions = {}) {
-		const { parsed, settings } = requireReady();
+		const { parsed } = requireReady();
 		if (get(generating).has(sessionId)) throw new ChatError('busy', 'Still answering the last question.');
 		const session =
 			get(chatSessions).find((s) => s.id === sessionId) ?? (await deps.storage.getSession(sessionId));
@@ -236,14 +232,10 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 
 		let lastPersist = now();
 		let current = answer;
+		let answeredBy: string | undefined;
 		try {
-			for await (const event of deps.stream({
-				endpoint: settings.endpoint,
-				apiKey: settings.apiKey,
-				model: settings.chatModel,
-				messages,
-				signal: controller.signal
-			})) {
+			// No model: the relay uses the server's OPENROUTER_MODEL.
+			for await (const event of deps.stream({ messages, signal: controller.signal })) {
 				if (event.type === 'delta') {
 					current = { ...current, content: current.content + event.text };
 					setMessage(current);
@@ -253,6 +245,7 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 						await deps.storage.putMessage(current);
 					}
 				} else if (event.type === 'done') {
+					answeredBy = event.model;
 					current = { ...current, status: 'complete', ...(event.usage && { usage: event.usage }) };
 				}
 			}
@@ -279,7 +272,7 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 		// summary may have been written meanwhile, and must not be overwritten.
 		const messageCount = messagesOf(sessionId).length;
 		const latest = get(chatSessions).find((s) => s.id === sessionId) ?? session;
-		await saveSession({ ...latest, messageCount, updatedAt: now(), model: settings.chatModel });
+		await saveSession({ ...latest, messageCount, updatedAt: now(), model: answeredBy ?? latest.model });
 		const highlight = deps.highlights.all().find((h) => h.id === session.highlightId);
 		if (highlight) deps.highlights.update({ ...highlight, messageCount });
 

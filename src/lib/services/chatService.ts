@@ -18,7 +18,6 @@ import { createSummaryScheduler } from './summaryScheduler';
 export const chat = createChatController({
 	storage: chatStorage,
 	stream: streamChat,
-	getSettings: () => get(chatSettings),
 	getDocument: () => {
 		const open = get(openDocument);
 		return open ? { pdfKey: open.pdfKey, parsed: get(openParsedDocument) } : null;

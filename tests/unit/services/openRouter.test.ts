@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-	checkApiKey,
+	checkConnection,
 	createSseParser,
-	listModels,
+	fetchRelayStatus,
 	OpenRouterError,
 	streamChat,
 	type StreamEvent,
@@ -35,9 +35,6 @@ const DONE = 'data: [DONE]\n\n';
 
 function request(fetchImpl: typeof fetch, overrides: Partial<StreamRequest> = {}): StreamRequest {
 	return {
-		endpoint: 'https://openrouter.ai/api/v1/',
-		apiKey: 'sk-test',
-		model: 'anthropic/claude-sonnet-5',
 		messages: [{ role: 'user', content: 'Why scale by √dk?' }],
 		fetchImpl,
 		...overrides
@@ -94,23 +91,43 @@ describe('streamChat', () => {
 		expect(events.at(-1)).toEqual({ type: 'done', usage: { promptTokens: 12, completionTokens: 3 } });
 	});
 
-	it('sends the model, messages, streaming flags and identifying headers', async () => {
+	it('reports the model that answered', async () => {
+		const chunk = `data: ${JSON.stringify({ model: 'moonshotai/kimi-k3', choices: [{ delta: { content: 'hi' } }] })}\n\n`;
+		const events = await collect(streamChat(request(async () => sseResponse([chunk, DONE]).response)));
+		expect(events.at(-1)).toEqual({ type: 'done', model: 'moonshotai/kimi-k3' });
+	});
+
+	it('posts to the relay without a key, leaving the model to the server', async () => {
 		const fetchImpl = vi.fn(async () => sseResponse([DONE]).response);
 		await collect(streamChat(request(fetchImpl, { maxTokens: 120, temperature: 0.2 })));
 
 		const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
-		expect(url).toBe('https://openrouter.ai/api/v1/chat/completions'); // trailing slash handled
-		const headers = init.headers as Record<string, string>;
-		expect(headers.Authorization).toBe('Bearer sk-test');
-		expect(headers['X-Title']).toBe('LeedPDF');
+		expect(url).toBe('/api/openrouter/chat/completions');
+		expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
 		expect(JSON.parse(init.body as string)).toEqual({
-			model: 'anthropic/claude-sonnet-5',
 			messages: [{ role: 'user', content: 'Why scale by √dk?' }],
 			stream: true,
 			usage: { include: true },
 			max_tokens: 120,
 			temperature: 0.2
 		});
+	});
+
+	it('posts summaries to the summary route and honours another endpoint', async () => {
+		const fetchImpl = vi.fn(async () => sseResponse([DONE]).response);
+		await collect(streamChat(request(fetchImpl, { purpose: 'summary', endpoint: 'https://x.test/v1/' })));
+		const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+		expect(url).toBe('https://x.test/v1/summary/completions'); // trailing slash handled
+		expect(JSON.parse(init.body as string)).not.toHaveProperty('model');
+	});
+
+	it('maps a relay without a key or model to "not_configured"', async () => {
+		const res = new Response(
+			JSON.stringify({ error: { code: 'not_configured', message: 'OPENROUTER_API_KEY is not set on the server.' } }),
+			{ status: 503 }
+		);
+		const error = await expectError(collect(streamChat(request(async () => res))), 'not_configured');
+		expect(error.message).toContain('OPENROUTER_API_KEY');
 	});
 
 	it('reassembles a multi-byte character split across network chunks', async () => {
@@ -213,42 +230,53 @@ describe('streamChat', () => {
 	});
 });
 
-describe('model catalogue and key check', () => {
-	it('lists models with image support and price per million tokens', async () => {
-		const res = new Response(
-			JSON.stringify({
-				data: [
-					{
-						id: 'anthropic/claude-sonnet-5',
-						name: 'Claude Sonnet 5',
-						context_length: 1_000_000,
-						architecture: { input_modalities: ['text', 'image', 'file'] },
-						pricing: { prompt: '0.000002' }
-					},
-					{ id: 'text/only', architecture: { input_modalities: ['text'] } }
-				]
-			})
+describe('relay status and key check', () => {
+	it('reads the relay status', async () => {
+		const fetchImpl = vi.fn(
+			async () =>
+				new Response(
+					JSON.stringify({
+						configured: true,
+						model: 'moonshotai/kimi-k3',
+						summaryModel: 'anthropic/claude-haiku-4.5',
+						missing: []
+					})
+				)
 		);
-		const models = await listModels('https://openrouter.ai/api/v1', async () => res);
-		expect(models[0]).toEqual({
-			id: 'anthropic/claude-sonnet-5',
-			name: 'Claude Sonnet 5',
-			contextLength: 1_000_000,
-			acceptsImages: true,
-			promptPricePerM: 2
+		expect(await fetchRelayStatus(undefined, fetchImpl)).toEqual({
+			configured: true,
+			model: 'moonshotai/kimi-k3',
+			summaryModel: 'anthropic/claude-haiku-4.5',
+			missing: []
 		});
-		expect(models[1]).toMatchObject({ id: 'text/only', name: 'text/only', acceptsImages: false });
+		expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe('/api/openrouter/status');
 	});
 
-	it('checks a key: label on success, auth error on rejection', async () => {
-		const ok = new Response(JSON.stringify({ data: { label: 'sk-or-v1-abc...xyz' } }));
-		expect(await checkApiKey('https://openrouter.ai/api/v1', 'k', async () => ok)).toEqual({
-			label: 'sk-or-v1-abc...xyz'
+	it('treats a malformed status as not configured, and a missing relay as a network error', async () => {
+		expect(await fetchRelayStatus(undefined, async () => new Response('{}'))).toEqual({
+			configured: false,
+			model: null,
+			summaryModel: null,
+			missing: []
 		});
+		await expectError(
+			fetchRelayStatus(undefined, async () => {
+				throw new TypeError('Failed to fetch');
+			}),
+			'network'
+		);
+	});
+
+	it("checks the server's key: label on success, auth error on rejection", async () => {
+		const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ data: { label: 'sk-or-v1-abc...xyz' } })));
+		expect(await checkConnection(undefined, fetchImpl)).toEqual({ label: 'sk-or-v1-abc...xyz' });
+		const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit | undefined];
+		expect(url).toBe('/api/openrouter/key');
+		expect(init).toBeUndefined(); // no key from the browser
 
 		const bad = new Response(JSON.stringify({ error: { message: 'User not found.', code: 401 } }), {
 			status: 401
 		});
-		await expectError(checkApiKey('https://openrouter.ai/api/v1', 'k', async () => bad), 'auth');
+		await expectError(checkConnection(undefined, async () => bad), 'auth');
 	});
 });

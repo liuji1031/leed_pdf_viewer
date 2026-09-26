@@ -1,11 +1,14 @@
 /**
- * OpenRouter client: streaming chat completions straight from the browser.
+ * OpenRouter client: streaming chat completions through the app's
+ * /api/openrouter relay, which adds the server's API key and default model.
  *
- * Verified against the live API: CORS allows any origin with Authorization,
- * HTTP-Referer and X-Title; errors arrive as JSON `{ error: { message, code } }`
- * with the HTTP status, before any streaming starts. Mid-stream failures arrive
- * as a `data:` payload carrying an `error` object instead of a delta.
+ * Verified against the live API: errors arrive as JSON
+ * `{ error: { message, code } }` with the HTTP status, before any streaming
+ * starts. Mid-stream failures arrive as a `data:` payload carrying an `error`
+ * object instead of a delta.
  */
+
+export const OPENROUTER_RELAY = '/api/openrouter';
 
 export type ContentPart =
 	| { type: 'text'; text: string }
@@ -17,7 +20,8 @@ export interface OpenRouterMessage {
 }
 
 export type OpenRouterErrorKind =
-	| 'auth' // bad or missing API key
+	| 'not_configured' // the server has no API key or model
+	| 'auth' // bad API key
 	| 'credits' // out of credits
 	| 'rate_limit'
 	| 'bad_request' // unknown model, context too long, malformed request
@@ -44,12 +48,16 @@ export interface Usage {
 	completionTokens: number;
 }
 
-export type StreamEvent = { type: 'delta'; text: string } | { type: 'done'; usage?: Usage };
+export type StreamEvent =
+	| { type: 'delta'; text: string }
+	/** `model` is the one that actually answered, as reported by OpenRouter. */
+	| { type: 'done'; usage?: Usage; model?: string };
 
 export interface StreamRequest {
-	endpoint: string;
-	apiKey: string;
-	model: string;
+	/** Defaults to the app's relay. */
+	endpoint?: string;
+	/** Picks the server's model: OPENROUTER_MODEL for chat, OPENROUTER_SUMMARY_MODEL for summaries. */
+	purpose?: 'chat' | 'summary';
 	messages: OpenRouterMessage[];
 	signal?: AbortSignal;
 	maxTokens?: number;
@@ -58,9 +66,8 @@ export interface StreamRequest {
 	fetchImpl?: typeof fetch;
 }
 
-const APP_TITLE = 'LeedPDF';
-
-function kindForStatus(status: number): OpenRouterErrorKind {
+function kindForStatus(status: number, code?: unknown): OpenRouterErrorKind {
+	if (code === 'not_configured') return 'not_configured';
 	if (status === 401 || status === 403) return 'auth';
 	if (status === 402) return 'credits';
 	if (status === 429) return 'rate_limit';
@@ -68,31 +75,21 @@ function kindForStatus(status: number): OpenRouterErrorKind {
 	return 'bad_request';
 }
 
-function headers(apiKey: string): Record<string, string> {
-	const h: Record<string, string> = {
-		Authorization: `Bearer ${apiKey}`,
-		'Content-Type': 'application/json',
-		'X-Title': APP_TITLE
-	};
-	if (typeof window !== 'undefined' && window.location?.origin) {
-		h['HTTP-Referer'] = window.location.origin;
-	}
-	return h;
-}
-
-function joinUrl(endpoint: string, path: string): string {
-	return `${endpoint.replace(/\/+$/, '')}/${path}`;
+function joinUrl(endpoint: string | undefined, path: string): string {
+	return `${(endpoint ?? OPENROUTER_RELAY).replace(/\/+$/, '')}/${path}`;
 }
 
 async function errorFromResponse(res: Response): Promise<OpenRouterError> {
 	let message = `${res.status} ${res.statusText}`.trim();
+	let code: unknown;
 	try {
 		const body = await res.json();
 		if (body?.error?.message) message = body.error.message;
+		code = body?.error?.code;
 	} catch {
 		// Not JSON — keep the status line.
 	}
-	return new OpenRouterError(kindForStatus(res.status), message, res.status);
+	return new OpenRouterError(kindForStatus(res.status, code), message, res.status);
 }
 
 function isAbort(error: unknown, signal?: AbortSignal): boolean {
@@ -133,11 +130,11 @@ export async function* streamChat(req: StreamRequest): AsyncGenerator<StreamEven
 	const fetchImpl = req.fetchImpl ?? fetch;
 	let res: Response;
 	try {
-		res = await fetchImpl(joinUrl(req.endpoint, 'chat/completions'), {
+		const path = req.purpose === 'summary' ? 'summary/completions' : 'chat/completions';
+		res = await fetchImpl(joinUrl(req.endpoint, path), {
 			method: 'POST',
-			headers: headers(req.apiKey),
+			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
-				model: req.model,
 				messages: req.messages,
 				stream: true,
 				usage: { include: true },
@@ -158,6 +155,7 @@ export async function* streamChat(req: StreamRequest): AsyncGenerator<StreamEven
 	const decoder = new TextDecoder();
 	const parser = createSseParser();
 	let usage: Usage | undefined;
+	let model: string | undefined;
 	let finished = false;
 
 	const handle = (payload: string): string | null => {
@@ -174,6 +172,7 @@ export async function* streamChat(req: StreamRequest): AsyncGenerator<StreamEven
 		if (json.error) {
 			throw new OpenRouterError('provider', json.error.message ?? 'The model provider failed', json.error.code);
 		}
+		if (typeof json.model === 'string' && json.model) model = json.model;
 		if (json.usage) {
 			usage = {
 				promptTokens: json.usage.prompt_tokens ?? 0,
@@ -216,55 +215,41 @@ export async function* streamChat(req: StreamRequest): AsyncGenerator<StreamEven
 		if (req.signal?.aborted) throw new OpenRouterError('aborted', 'Request cancelled');
 		throw new OpenRouterError('truncated', 'The answer was cut off before it finished');
 	}
-	yield { type: 'done', usage };
+	yield { type: 'done', usage, ...(model && { model }) };
 }
 
-export interface ModelInfo {
-	id: string;
-	name: string;
-	contextLength: number;
-	/** Whether the model accepts image input — needed for sending page images. */
-	acceptsImages: boolean;
-	/** USD per million prompt tokens. */
-	promptPricePerM: number;
+export interface RelayStatus {
+	configured: boolean;
+	/** The server's OPENROUTER_MODEL. */
+	model: string | null;
+	/** OPENROUTER_SUMMARY_MODEL, or the chat model when that is unset. */
+	summaryModel: string | null;
+	missing: string[];
 }
 
-/** The public model catalogue. Needs no API key. */
-export async function listModels(endpoint: string, fetchImpl: typeof fetch = fetch): Promise<ModelInfo[]> {
+/** Whether the server has an API key and model; rejects if the relay is unreachable. */
+export async function fetchRelayStatus(endpoint?: string, fetchImpl: typeof fetch = fetch): Promise<RelayStatus> {
 	let res: Response;
 	try {
-		res = await fetchImpl(joinUrl(endpoint, 'models'));
+		res = await fetchImpl(joinUrl(endpoint, 'status'));
 	} catch (error) {
-		throw new OpenRouterError('network', 'Could not reach OpenRouter', undefined, { cause: error });
+		throw new OpenRouterError('network', 'Could not reach the chat relay', undefined, { cause: error });
 	}
 	if (!res.ok) throw await errorFromResponse(res);
 	const body = await res.json();
-	return (body?.data ?? []).map(
-		(m: {
-			id: string;
-			name?: string;
-			context_length?: number;
-			architecture?: { input_modalities?: string[] };
-			pricing?: { prompt?: string };
-		}): ModelInfo => ({
-			id: m.id,
-			name: m.name ?? m.id,
-			contextLength: m.context_length ?? 0,
-			acceptsImages: m.architecture?.input_modalities?.includes('image') ?? false,
-			promptPricePerM: Number(m.pricing?.prompt ?? 0) * 1e6
-		})
-	);
+	return {
+		configured: body?.configured === true,
+		model: typeof body?.model === 'string' ? body.model : null,
+		summaryModel: typeof body?.summaryModel === 'string' ? body.summaryModel : null,
+		missing: Array.isArray(body?.missing) ? body.missing : []
+	};
 }
 
-/** Check an API key; resolves with its label, rejects with an `auth` error if invalid. */
-export async function checkApiKey(
-	endpoint: string,
-	apiKey: string,
-	fetchImpl: typeof fetch = fetch
-): Promise<{ label: string }> {
+/** Check the server's API key; resolves with its label, rejects with an `auth` error if invalid. */
+export async function checkConnection(endpoint?: string, fetchImpl: typeof fetch = fetch): Promise<{ label: string }> {
 	let res: Response;
 	try {
-		res = await fetchImpl(joinUrl(endpoint, 'key'), { headers: headers(apiKey) });
+		res = await fetchImpl(joinUrl(endpoint, 'key'));
 	} catch (error) {
 		throw new OpenRouterError('network', 'Could not reach OpenRouter', undefined, { cause: error });
 	}

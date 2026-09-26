@@ -23,7 +23,7 @@
 		chatSettingsOpen,
 		clampPanelWidth
 	} from '$lib/stores/chatPanelStore';
-	import { chatSettings } from '$lib/stores/chatSettingsStore';
+	import { openRouterStatus, refreshOpenRouterStatus } from '$lib/stores/openRouterStatusStore';
 	import {
 		activeSessionId,
 		askRequest,
@@ -63,15 +63,19 @@
 	$: messages = activeSession ? ($chatMessages.get(activeSession.id) ?? []) : [];
 	$: busy = activeSession ? $generating.has(activeSession.id) : false;
 	$: pendingAsk = !activeSession ? $askRequest : null;
-	$: hasKey = !!$chatSettings.apiKey.trim();
+	// Re-checked whenever the panel opens, so an edited .env shows up after a restart.
+	$: if ($chatPanelOpen) void refreshOpenRouterStatus();
+	$: modelReady = $openRouterStatus.state === 'ready';
 	$: parse = $openDocumentParse;
 	$: parsed = $openParsedDocument;
 	$: highlightById = new Map([...$chatHighlights.values()].flat().map((h) => [h.id, h]));
 
 	$: blockedReason = !$openDocument
 		? 'Open a PDF first'
-		: !hasKey
-			? 'Add your API key in settings'
+		: !modelReady
+			? $openRouterStatus.state === 'checking'
+				? 'Connecting to the chat service'
+				: 'Chat isn’t set up on the server'
 			: !parsed
 				? parse?.status === 'failed'
 					? 'The paper could not be parsed'
@@ -343,12 +347,19 @@
 
 		<!-- Body -->
 		<div class="flex min-h-0 flex-1 flex-col">
-			{#if !hasKey}
+			{#if $openRouterStatus.state === 'missing' || $openRouterStatus.state === 'unavailable'}
 				<div class="m-3 rounded-xl border border-dashed border-gray-300 p-4 text-sm text-slate dark:border-gray-600 dark:text-gray-300" data-testid="chat-needs-key">
 					<p class="mb-2 font-medium text-charcoal dark:text-gray-100">Connect a model</p>
-					<p class="mb-3">Answers come from a model you choose on OpenRouter, using your own API key.</p>
-					<button class="rounded-lg bg-sage px-3 py-1.5 text-sm font-medium text-white hover:brightness-110" on:click={() => chatSettingsOpen.set(true)}>
-						Add API key
+					{#if $openRouterStatus.state === 'missing'}
+						<p class="mb-3">
+							Set <code class="rounded bg-gray-100 px-1 text-xs dark:bg-gray-700">{$openRouterStatus.missing.join(' and ')}</code>
+							in <code class="rounded bg-gray-100 px-1 text-xs dark:bg-gray-700">.env</code>, then restart the app.
+						</p>
+					{:else}
+						<p class="mb-3">The chat service on this server can’t be reached.</p>
+					{/if}
+					<button class="rounded-lg border border-gray-200 px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700" on:click={() => refreshOpenRouterStatus()}>
+						Check again
 					</button>
 				</div>
 			{/if}

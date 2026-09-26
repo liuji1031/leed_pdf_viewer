@@ -2,7 +2,6 @@ import type { ChatSession } from '$lib/utils/chatStorage';
 import type { ChatMessage } from '$lib/utils/chatStorage';
 import type { ChatHighlight } from '$lib/stores/drawingStore';
 import type { ChatSettings } from '$lib/stores/chatSettingsStore';
-import { summaryModelOf } from '$lib/stores/chatSettingsStore';
 import type { StreamEvent, StreamRequest } from './openRouter';
 
 /**
@@ -118,7 +117,7 @@ export function createSummaryScheduler(deps: SummarySchedulerDeps): SummarySched
 		const signal = controller.signal;
 		const run = (async () => {
 			const settings = deps.getSettings();
-			if (!settings.autoSummarize || !settings.apiKey.trim()) return;
+			if (!settings.autoSummarize) return;
 
 			// Compare-and-set against the latest copy: never summarise twice.
 			const session = await deps.getSession(sessionId);
@@ -141,9 +140,7 @@ export function createSummaryScheduler(deps: SummarySchedulerDeps): SummarySched
 			let summary = '';
 			try {
 				for await (const event of deps.stream({
-					endpoint: settings.endpoint,
-					apiKey: settings.apiKey,
-					model: summaryModelOf(settings),
+					purpose: 'summary',
 					messages: buildSummaryMessages(session, messages),
 					maxTokens: 120,
 					temperature: 0.2,

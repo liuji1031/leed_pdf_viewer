@@ -13,6 +13,13 @@ x-public-env: &public-env
   PUBLIC_APPWRITE_SHARED_PDFS_COLLECTION_ID: ${PUBLIC_APPWRITE_SHARED_PDFS_COLLECTION_ID:-}
   PUBLIC_APPWRITE_PDF_ANNOTATIONS_COLLECTION_ID: ${PUBLIC_APPWRITE_PDF_ANNOTATIONS_COLLECTION_ID:-}
 
+# Chat: the /api/openrouter relay adds this key and default model server-side,
+# so neither is entered in (or stored by) the browser.
+x-openrouter-env: &openrouter-env
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+  OPENROUTER_SUMMARY_MODEL: ${OPENROUTER_SUMMARY_MODEL:-}
+
 # Source bind-mount plus an anonymous volume that shadows node_modules, so the
 # image's installed dependencies survive the mount instead of being hidden by
 # the (absent) host node_modules. Containers run as uid 1000 (see Dockerfile),
@@ -33,7 +40,7 @@ services:
       context: .
       target: dev
     environment:
-      <<: *public-env
+      <<: [*public-env, *openrouter-env]
       # Host-side address the browser connects back to for HMR. Must be the
       # host's value, not the container's, or the websocket never connects.
       VITE_HMR_HOST: ${VITE_HMR_HOST:-localhost}
@@ -79,6 +86,7 @@ services:
     environment:
       MINERU_URL: ${MINERU_URL:-http://mineru:8000}
       MINERU_API_KEY: ${MINERU_API_KEY:-}
+      <<: *openrouter-env
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
       # adapter-node needs the public origin for form actions / CSRF checks.
       ORIGIN: ${ORIGIN:-http://localhost:3000}

@@ -5,7 +5,6 @@ import {
 	chatSettings,
 	DEFAULT_CHAT_SETTINGS,
 	parseChatSettings,
-	summaryModelOf,
 	updateChatSettings
 } from '../../../src/lib/stores/chatSettingsStore';
 
@@ -18,23 +17,33 @@ describe('parseChatSettings', () => {
 	});
 
 	it('merges stored values over the defaults', () => {
-		const parsed = parseChatSettings(JSON.stringify({ apiKey: 'sk-or-1', summaryIdleMs: 120_000 }));
-		expect(parsed).toEqual({ ...DEFAULT_CHAT_SETTINGS, apiKey: 'sk-or-1', summaryIdleMs: 120_000 });
+		const parsed = parseChatSettings(JSON.stringify({ parserTier: 'standard', summaryIdleMs: 120_000 }));
+		expect(parsed).toEqual({ ...DEFAULT_CHAT_SETTINGS, parserTier: 'standard', summaryIdleMs: 120_000 });
+	});
+
+	it('drops an API key, endpoint and models saved by an older version', () => {
+		const parsed = parseChatSettings(
+			JSON.stringify({
+				apiKey: 'sk-or-1',
+				endpoint: 'https://openrouter.ai/api/v1',
+				chatModel: 'a/b',
+				summaryModel: 'c/d'
+			})
+		);
+		expect(parsed).toEqual(DEFAULT_CHAT_SETTINGS);
+		expect(parsed).not.toHaveProperty('apiKey');
+		expect(parsed).not.toHaveProperty('summaryModel');
 	});
 
 	it('falls back field by field for invalid values instead of discarding everything', () => {
 		const parsed = parseChatSettings(
 			JSON.stringify({
-				apiKey: 'sk-or-1',
-				endpoint: '   ',
-				chatModel: 42,
+				parserTier: 'standard',
 				summaryIdleMs: 10, // below the 5s floor
 				autoSummarize: 'yes'
 			})
 		);
-		expect(parsed.apiKey).toBe('sk-or-1');
-		expect(parsed.endpoint).toBe(DEFAULT_CHAT_SETTINGS.endpoint);
-		expect(parsed.chatModel).toBe(DEFAULT_CHAT_SETTINGS.chatModel);
+		expect(parsed.parserTier).toBe('standard');
 		expect(parsed.summaryIdleMs).toBe(DEFAULT_CHAT_SETTINGS.summaryIdleMs);
 		expect(parsed.autoSummarize).toBe(DEFAULT_CHAT_SETTINGS.autoSummarize);
 	});
@@ -47,17 +56,10 @@ describe('chatSettings store', () => {
 	});
 
 	it('persists every update under its key', () => {
-		updateChatSettings({ apiKey: 'sk-or-2' });
-		expect(get(chatSettings).apiKey).toBe('sk-or-2');
+		updateChatSettings({ summaryIdleMs: 120_000 });
+		expect(get(chatSettings).summaryIdleMs).toBe(120_000);
 		const [key, value] = storage().setItem.mock.calls.at(-1);
 		expect(key).toBe(CHAT_SETTINGS_KEY);
-		expect(JSON.parse(value).apiKey).toBe('sk-or-2');
-	});
-
-	it('summarises with the chat model unless a summary model is set', () => {
-		expect(summaryModelOf({ ...DEFAULT_CHAT_SETTINGS, summaryModel: '  ' })).toBe(DEFAULT_CHAT_SETTINGS.chatModel);
-		expect(summaryModelOf({ ...DEFAULT_CHAT_SETTINGS, summaryModel: 'anthropic/claude-haiku-4.5' })).toBe(
-			'anthropic/claude-haiku-4.5'
-		);
+		expect(JSON.parse(value).summaryIdleMs).toBe(120_000);
 	});
 });

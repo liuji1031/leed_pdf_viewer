@@ -1,22 +1,19 @@
 <script lang="ts">
 	import { fade, fly } from 'svelte/transition';
-	import { Check, Eye, EyeOff, Loader2, X } from 'lucide-svelte';
+	import { Check, Loader2, X } from 'lucide-svelte';
 	import { chatSettings, DEFAULT_CHAT_SETTINGS, type ChatSettings } from '$lib/stores/chatSettingsStore';
-	import { checkApiKey, listModels, type ModelInfo } from '$lib/services/openRouter';
+	import { openRouterStatus, refreshOpenRouterStatus } from '$lib/stores/openRouterStatusStore';
+	import { checkConnection } from '$lib/services/openRouter';
 	import { MinerUClient } from '$lib/services/docParser/mineruClient';
 	import { trapFocus } from '$lib/utils/trapFocus';
 
 	export let isOpen = false;
 
-	const SUGGESTED_SUMMARY_MODEL = 'anthropic/claude-haiku-4.5';
-
 	let draft: ChatSettings = { ...$chatSettings };
-	let showKey = false;
-	let models: ModelInfo[] = [];
 	let keyCheck: { state: 'idle' | 'checking' | 'ok' | 'error'; message?: string } = { state: 'idle' };
 	let parserCheck: { state: 'idle' | 'checking' | 'ok' | 'error'; message?: string } = { state: 'idle' };
 
-	// Fresh draft each time the dialog opens; the model list is loaded once.
+	// Fresh draft each time the dialog opens.
 	// (A function, not two reactive statements: Svelte would run the one that
 	// records the previous state first, and the reset would never fire.)
 	let lastOpen = false;
@@ -26,16 +23,11 @@
 			draft = { ...$chatSettings };
 			keyCheck = { state: 'idle' };
 			parserCheck = { state: 'idle' };
-			if (!models.length) {
-				listModels(draft.endpoint)
-					.then((list) => (models = list.sort((a, b) => a.id.localeCompare(b.id))))
-					.catch(() => (models = []));
-			}
+			void refreshOpenRouterStatus();
 		}
 		lastOpen = open;
 	}
 
-	$: chosenModel = models.find((m) => m.id === draft.chatModel);
 	$: idleMinutes = Math.round(draft.summaryIdleMs / 60_000);
 
 	function close() {
@@ -43,14 +35,14 @@
 	}
 
 	function save() {
-		chatSettings.set({ ...draft, apiKey: draft.apiKey.trim(), parserApiKey: draft.parserApiKey.trim() });
+		chatSettings.set({ ...draft, parserApiKey: draft.parserApiKey.trim() });
 		close();
 	}
 
 	async function testKey() {
 		keyCheck = { state: 'checking' };
 		try {
-			const { label } = await checkApiKey(draft.endpoint, draft.apiKey.trim());
+			const { label } = await checkConnection();
 			keyCheck = { state: 'ok', message: `Key works (${label})` };
 		} catch (error) {
 			keyCheck = { state: 'error', message: error instanceof Error ? error.message : String(error) };
@@ -101,7 +93,7 @@
 					<h2 id="chat-settings-title" class="text-lg font-semibold text-charcoal dark:text-white">
 						Chat settings
 					</h2>
-					<p class="text-xs text-slate dark:text-gray-400 mt-0.5">Model, API key and document parsing</p>
+					<p class="text-xs text-slate dark:text-gray-400 mt-0.5">Model, summaries and document parsing</p>
 				</div>
 				<button
 					on:click={close}
@@ -116,54 +108,39 @@
 				<!-- OpenRouter -->
 				<section class="space-y-3">
 					<h3 class="text-sm font-semibold text-charcoal dark:text-gray-100">OpenRouter</h3>
+					<div class="rounded-lg bg-gray-50 px-3 py-2 text-sm dark:bg-gray-900/50" data-testid="chat-model-status">
+						{#if $openRouterStatus.state === 'ready'}
+							<p class="text-charcoal dark:text-gray-100">
+								Model <code class="rounded bg-white px-1 text-xs dark:bg-gray-800">{$openRouterStatus.model}</code>
+							</p>
+							<p class="text-charcoal dark:text-gray-100">
+								Summaries <code class="rounded bg-white px-1 text-xs dark:bg-gray-800">{$openRouterStatus.summaryModel}</code>
+							</p>
+						{:else if $openRouterStatus.state === 'missing'}
+							<p class="text-amber-700 dark:text-amber-400">Not set on the server: {$openRouterStatus.missing.join(', ')}</p>
+						{:else if $openRouterStatus.state === 'unavailable'}
+							<p class="text-amber-700 dark:text-amber-400">The chat service on this server can’t be reached.</p>
+						{:else}
+							<p class="text-slate dark:text-gray-400">Checking…</p>
+						{/if}
+						<p class="mt-1 text-[11px] text-slate dark:text-gray-500">
+							The API key and models come from <code>OPENROUTER_API_KEY</code>, <code>OPENROUTER_MODEL</code> and
+							<code>OPENROUTER_SUMMARY_MODEL</code> in <code>.env</code>; restart the app after changing them.
+						</p>
+					</div>
 					<div>
-						<label class={label} for="chat-api-key">API key</label>
-						<div class="flex gap-2">
-							<div class="relative flex-1">
-								{#if showKey}
-									<input id="chat-api-key" class={field} type="text" bind:value={draft.apiKey} placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false" />
-								{:else}
-									<input id="chat-api-key" class={field} type="password" bind:value={draft.apiKey} placeholder="sk-or-v1-…" autocomplete="off" />
-								{/if}
-								<button
-									type="button"
-									class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-									on:click={() => (showKey = !showKey)}
-									aria-label={showKey ? 'Hide key' : 'Show key'}
-								>
-									{#if showKey}<EyeOff size={16} />{:else}<Eye size={16} />{/if}
-								</button>
-							</div>
-							<button
-								type="button"
-								class="shrink-0 rounded-lg border border-gray-200 dark:border-gray-600 px-3 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-								disabled={!draft.apiKey.trim() || keyCheck.state === 'checking'}
-								on:click={testKey}
-							>
-								{#if keyCheck.state === 'checking'}<Loader2 size={14} class="animate-spin" />{:else}Test{/if}
-							</button>
-						</div>
+						<button
+							type="button"
+							class="rounded-lg border border-gray-200 dark:border-gray-600 px-3 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+							disabled={$openRouterStatus.state !== 'ready' || keyCheck.state === 'checking'}
+							on:click={testKey}
+						>
+							{#if keyCheck.state === 'checking'}<Loader2 size={14} class="animate-spin" />{:else}Test API key{/if}
+						</button>
 						{#if keyCheck.state === 'ok'}
 							<p class="mt-1 flex items-center gap-1 text-xs text-sage"><Check size={12} /> {keyCheck.message}</p>
 						{:else if keyCheck.state === 'error'}
 							<p class="mt-1 text-xs text-red-600 dark:text-red-400">{keyCheck.message}</p>
-						{/if}
-						<p class="mt-1 text-[11px] text-slate dark:text-gray-500">
-							Stored in this browser only, and sent only to OpenRouter.
-						</p>
-					</div>
-
-					<div>
-						<label class={label} for="chat-model">Chat model</label>
-						<input id="chat-model" class={field} list="chat-model-options" bind:value={draft.chatModel} spellcheck="false" />
-						<datalist id="chat-model-options">
-							{#each models as m (m.id)}<option value={m.id}>{m.name}</option>{/each}
-						</datalist>
-						{#if chosenModel}
-							<p class="mt-1 text-[11px] text-slate dark:text-gray-500">
-								${chosenModel.promptPricePerM.toFixed(2)}/M input tokens ·
-								{chosenModel.acceptsImages ? 'can read page images' : 'text only'}
-							</p>
 						{/if}
 					</div>
 				</section>
@@ -176,18 +153,6 @@
 						Summarise each conversation for its highlight
 					</label>
 					<div class="grid grid-cols-2 gap-3">
-						<div>
-							<label class={label} for="summary-model">Summary model</label>
-							<input
-								id="summary-model"
-								class={field}
-								list="chat-model-options"
-								bind:value={draft.summaryModel}
-								placeholder="Same as chat model"
-								spellcheck="false"
-								disabled={!draft.autoSummarize}
-							/>
-						</div>
 						<div>
 							<label class={label} for="summary-idle">After idle (minutes)</label>
 							<input
@@ -205,15 +170,6 @@
 							/>
 						</div>
 					</div>
-					{#if draft.autoSummarize && !draft.summaryModel}
-						<button
-							type="button"
-							class="text-[11px] text-sage hover:underline"
-							on:click={() => (draft.summaryModel = SUGGESTED_SUMMARY_MODEL)}
-						>
-							Use a cheaper model for summaries ({SUGGESTED_SUMMARY_MODEL})
-						</button>
-					{/if}
 				</section>
 
 				<!-- Parser -->

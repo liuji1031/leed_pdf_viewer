@@ -56,12 +56,30 @@ async function mockParser(page: Page, { configured = true } = {}) {
 	});
 }
 
-/** OpenRouter answering with the next scripted, streamed answer; records request bodies. */
-async function mockOpenRouter(page: Page) {
-	const requests: { messages: { role: string; content: unknown }[]; model: string }[] = [];
-	await page.route('https://openrouter.ai/api/v1/chat/completions', async (route) => {
+/**
+ * The app's OpenRouter relay, configured (key and model set in .env) or not,
+ * answering with the next scripted, streamed answer; records request bodies.
+ */
+async function mockOpenRouter(page: Page, { configured = true } = {}) {
+	const requests: { messages: { role: string; content: unknown }[]; model?: string }[] = [];
+	await page.route('**/api/openrouter/status', (route) =>
+		route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify(
+				configured
+					? { configured: true, model: 'test/model', summaryModel: 'test/summary-model', missing: [] }
+					: {
+							configured: false,
+							model: null,
+							summaryModel: null,
+							missing: ['OPENROUTER_API_KEY', 'OPENROUTER_MODEL']
+						}
+			)
+		})
+	);
+	await page.route('**/api/openrouter/*/completions', async (route) => {
 		const body = JSON.parse(route.request().postData() ?? '{}');
-		const isSummary = String(body.messages?.[0]?.content ?? '').startsWith('In at most 25 words');
+		const isSummary = route.request().url().endsWith('/summary/completions');
 		if (!isSummary) requests.push(body);
 		const chunks = isSummary
 			? [SUMMARY]
@@ -71,18 +89,11 @@ async function mockOpenRouter(page: Page) {
 			'data: [DONE]\n\n';
 		await route.fulfill({
 			status: 200,
-			headers: { 'Content-Type': 'text/event-stream', 'Access-Control-Allow-Origin': '*' },
+			headers: { 'Content-Type': 'text/event-stream' },
 			body: sse
 		});
 	});
 	return requests;
-}
-
-async function addApiKey(page: Page) {
-	await page.getByTestId('chat-needs-key').getByRole('button', { name: 'Add API key' }).click();
-	await page.getByLabel('API key', { exact: true }).fill('sk-or-v1-test');
-	await page.getByTestId('chat-settings-save').click();
-	await expect(page.getByTestId('chat-needs-key')).toBeHidden();
 }
 
 async function selectTitle(page: Page) {
@@ -108,7 +119,7 @@ test.describe('Paper chat', () => {
 
 		await page.keyboard.press('c');
 		await expect(page.getByTestId('chat-panel')).toBeVisible();
-		await addApiKey(page);
+		await expect(page.getByTestId('chat-needs-key')).toBeHidden();
 		await expect(page.getByTestId('parse-status')).toHaveAttribute('data-status', 'done', { timeout: 20_000 });
 
 		// Ask
@@ -125,6 +136,7 @@ test.describe('Paper chat', () => {
 
 		// What was sent: the paper in the system message, the passage in the first question.
 		const first = requests[0];
+		expect(first.model).toBeUndefined(); // the relay fills in OPENROUTER_MODEL
 		expect(first.messages.map((m) => m.role)).toEqual(['system', 'user']);
 		expect(String(first.messages[0].content)).toContain('<paper>');
 		expect(String(first.messages[1].content)).toContain('Location: page 1 of 1');
@@ -154,9 +166,6 @@ test.describe('Paper chat', () => {
 	test('double-clicking a highlight reopens its conversation, in any tool', async ({ page }) => {
 		await mockParser(page);
 		await mockOpenRouter(page);
-		await page.addInitScript(() =>
-			localStorage.setItem('leedpdf_chat_settings', JSON.stringify({ apiKey: 'sk-or-v1-test' }))
-		);
 		await openPdf(page, fixture);
 		await page.keyboard.press('c');
 		await expect(page.getByTestId('parse-status')).toHaveAttribute('data-status', 'done', { timeout: 20_000 });
@@ -187,9 +196,6 @@ test.describe('Paper chat', () => {
 	}) => {
 		await mockParser(page);
 		await mockOpenRouter(page);
-		await page.addInitScript(() =>
-			localStorage.setItem('leedpdf_chat_settings', JSON.stringify({ apiKey: 'sk-or-v1-test' }))
-		);
 		await openPdf(page, fixture);
 		await page.keyboard.press('c');
 		await expect(page.getByTestId('parse-status')).toHaveAttribute('data-status', 'done', { timeout: 20_000 });
@@ -218,9 +224,6 @@ test.describe('Paper chat', () => {
 	test('deletes a conversation with its highlight, and it stays deleted', async ({ page }) => {
 		await mockParser(page);
 		await mockOpenRouter(page);
-		await page.addInitScript(() =>
-			localStorage.setItem('leedpdf_chat_settings', JSON.stringify({ apiKey: 'sk-or-v1-test' }))
-		);
 		await openPdf(page, fixture);
 		await page.keyboard.press('c');
 		await expect(page.getByTestId('parse-status')).toHaveAttribute('data-status', 'done', { timeout: 20_000 });
@@ -247,9 +250,6 @@ test.describe('Paper chat', () => {
 	test('can attach an image of the page for multimodal models', async ({ page }) => {
 		await mockParser(page);
 		const requests = await mockOpenRouter(page);
-		await page.addInitScript(() =>
-			localStorage.setItem('leedpdf_chat_settings', JSON.stringify({ apiKey: 'sk-or-v1-test' }))
-		);
 		await openPdf(page, fixture);
 		await page.keyboard.press('c');
 		await expect(page.getByTestId('parse-status')).toHaveAttribute('data-status', 'done', { timeout: 20_000 });
@@ -270,10 +270,12 @@ test.describe('Paper chat', () => {
 
 	test('explains what is missing before a question can be asked', async ({ page }) => {
 		await mockParser(page, { configured: false });
+		await mockOpenRouter(page, { configured: false });
 		await openPdf(page, fixture);
 		await page.keyboard.press('c');
 
 		await expect(page.getByTestId('chat-needs-key')).toBeVisible();
+		await expect(page.getByTestId('chat-needs-key')).toContainText('OPENROUTER_API_KEY and OPENROUTER_MODEL');
 		await expect(page.getByTestId('parse-status')).toHaveAttribute('data-status', 'failed', { timeout: 20_000 });
 		await expect(page.getByTestId('parse-status')).toContainText('isn’t set up on this server');
 
@@ -281,6 +283,6 @@ test.describe('Paper chat', () => {
 		await page.getByTestId('ask-selection-chip').click();
 		await page.getByTestId('chat-input').fill('Anything?');
 		await expect(page.getByTestId('chat-send')).toBeDisabled();
-		await expect(page.getByTestId('chat-panel')).toContainText('Add your API key in settings');
+		await expect(page.getByTestId('chat-panel')).toContainText('Chat isn’t set up on the server');
 	});
 });

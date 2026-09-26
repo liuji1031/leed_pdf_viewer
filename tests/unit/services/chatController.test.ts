@@ -8,7 +8,6 @@ import { ChatError, createChatController } from '../../../src/lib/services/chatC
 import { structuredContentToDocument } from '../../../src/lib/services/docParser/mineruContent';
 import { OpenRouterError, type StreamEvent, type StreamRequest } from '../../../src/lib/services/openRouter';
 import { ChatStorageManager } from '../../../src/lib/utils/chatStorage';
-import { DEFAULT_CHAT_SETTINGS, type ChatSettings } from '../../../src/lib/stores/chatSettingsStore';
 import {
 	activeSessionId,
 	chatMessages,
@@ -57,14 +56,13 @@ function scriptedStream(script: { chunks: string[]; error?: Error; hangAfter?: n
 			yield { type: 'delta', text };
 		}
 		if (error) throw error;
-		yield { type: 'done', usage: { promptTokens: 100, completionTokens: chunks.length } };
+		yield { type: 'done', usage: { promptTokens: 100, completionTokens: chunks.length }, model: 'moonshotai/kimi-k3' };
 	};
 	return { stream, requests };
 }
 
 let storage: ChatStorageManager;
 let highlights: ChatHighlight[];
-let settings: ChatSettings;
 let parsed: typeof paper | null;
 let ids: number;
 
@@ -72,7 +70,6 @@ function controller(stream: (r: StreamRequest) => AsyncGenerator<StreamEvent>, e
 	return createChatController({
 		storage,
 		stream,
-		getSettings: () => settings,
 		getDocument: () => ({ pdfKey: 'paper.pdf_1', parsed }),
 		highlights: {
 			all: () => highlights,
@@ -89,7 +86,6 @@ beforeEach(() => {
 	resetChatStoreForTests();
 	storage = new ChatStorageManager(new IDBFactory());
 	highlights = [];
-	settings = { ...DEFAULT_CHAT_SETTINGS, apiKey: 'sk-or-test' };
 	parsed = paper;
 	ids = 0;
 });
@@ -115,7 +111,7 @@ describe('starting a conversation', () => {
 		expect(saved).toMatchObject({
 			highlightId: highlights[0].id,
 			quotedText: selection.anchor.text,
-			model: settings.chatModel,
+			model: 'moonshotai/kimi-k3',
 			messageCount: 2,
 			focusBlockIdx: scaled.idx
 		});
@@ -137,16 +133,6 @@ describe('starting a conversation', () => {
 		await c.startConversation(selection, 'two');
 		expect(highlights.map((h) => h.ordinal)).toEqual([1, 2]);
 		expect(get(chatSessions)).toHaveLength(2);
-	});
-
-	it('refuses without an API key, before creating anything', async () => {
-		settings = { ...settings, apiKey: '  ' };
-		const { stream } = scriptedStream([{ chunks: ['a'] }]);
-		const error = await controller(stream).startConversation(selection, 'q').catch((e) => e);
-		expect(error).toBeInstanceOf(ChatError);
-		expect((error as ChatError).kind).toBe('no_api_key');
-		expect(highlights).toEqual([]);
-		expect(get(chatSessions)).toEqual([]);
 	});
 
 	it('refuses while the document has not been parsed', async () => {
@@ -175,15 +161,20 @@ describe('follow-up questions', () => {
 		expect(highlights[0].messageCount).toBe(4);
 	});
 
-	it('uses the configured model, key and endpoint', async () => {
-		settings = { ...settings, chatModel: 'anthropic/claude-haiku-4.5', endpoint: 'https://example.test/v1' };
+	it("leaves the model, key and endpoint to the server's relay", async () => {
 		const { stream, requests } = scriptedStream([{ chunks: ['a'] }]);
 		await controller(stream).startConversation(selection, 'q');
-		expect(requests[0]).toMatchObject({
-			model: 'anthropic/claude-haiku-4.5',
-			apiKey: 'sk-or-test',
-			endpoint: 'https://example.test/v1'
-		});
+		expect(Object.keys(requests[0]).sort()).toEqual(['messages', 'signal']);
+	});
+
+	it('explains a relay that has no key or model configured', async () => {
+		const notConfigured = new OpenRouterError('not_configured', 'OPENROUTER_MODEL is not set on the server.', 503);
+		const { stream } = scriptedStream([{ chunks: [], error: notConfigured }]);
+		const id = await controller(stream).startConversation(selection, 'q');
+		const [, answer] = await storage.listMessages(id);
+		expect(answer.status).toBe('error');
+		expect(answer.content).toContain('OPENROUTER_MODEL is not set');
+		expect((await storage.getSession(id))!.model).toBe('');
 	});
 
 	it('passes whole-paper and page-image requests through to the prompt', async () => {
