@@ -30,7 +30,7 @@
 	import { handleSearchLinkClick } from '../utils/navigationUtils';
 	import { trackToolSelection } from '../utils/analytics';
 	import { goto } from '$app/navigation';
-	import { chatPanelOpen, toggleChatPanel } from '$lib/stores/chatPanelStore';
+	import { chatPanelOpen } from '$lib/stores/chatPanelStore';
 	import StampPalette from './StampPalette.svelte';
 	import Tooltip from '$lib/components/Tooltip.svelte';
 	import {
@@ -49,7 +49,6 @@
 		Layout,
 		Maximize2,
 		MessageSquareQuote,
-		MessagesSquare,
 		Minimize2,
 		Moon,
 		MoreHorizontal,
@@ -624,23 +623,10 @@
 					<button
 						class="tool-button w-8 h-8 flex items-center justify-center"
 						class:active={$drawingState.tool === 'ask'}
-						on:click={() => handleToolChange('ask')}
+						on:click={() => { handleToolChange('ask'); chatPanelOpen.set(true); }}
 						aria-label="Ask about text tool"
 					>
 						<MessageSquareQuote size={14} />
-					</button>
-				</Tooltip>
-
-				<Tooltip content="Paper chat (C)">
-					<button
-						class="tool-button w-8 h-8 flex items-center justify-center"
-						class:active={$chatPanelOpen}
-						on:click={toggleChatPanel}
-						aria-label="Toggle paper chat"
-						aria-pressed={$chatPanelOpen}
-						data-testid="chat-panel-toggle"
-					>
-						<MessagesSquare size={14} />
 					</button>
 				</Tooltip>
 
@@ -1520,20 +1506,10 @@
 			<button
 				class="tool-button flex items-center justify-center"
 				class:active={$drawingState.tool === 'ask'}
-				on:click={() => handleToolChange('ask')}
+				on:click={() => { handleToolChange('ask'); chatPanelOpen.set(true); }}
 				aria-label="Ask about text tool"
 			>
 				<MessageSquareQuote size={16} />
-			</button>
-
-			<button
-				class="tool-button flex items-center justify-center"
-				class:active={$chatPanelOpen}
-				on:click={toggleChatPanel}
-				aria-label="Toggle paper chat"
-				aria-pressed={$chatPanelOpen}
-			>
-				<MessagesSquare size={16} />
 			</button>
 
 			<div class="h-6 w-px bg-charcoal/20"></div>

@@ -179,9 +179,6 @@
 	>
 		<div class="mb-1 flex items-center gap-2 text-xs font-semibold text-indigo-600 dark:text-indigo-300">
 			<span class="chat-highlight-badge static-badge">{hovered.ordinal}</span>
-			{#if hovered.messageCount}
-				<span>{hovered.messageCount} message{hovered.messageCount === 1 ? '' : 's'}</span>
-			{/if}
 		</div>
 		{#if hovered.summaryStatus === 'ready' && hovered.summary}
 			<p class="leading-snug">{hovered.summary}</p>

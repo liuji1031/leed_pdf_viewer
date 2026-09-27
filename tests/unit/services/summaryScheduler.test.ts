@@ -318,4 +318,14 @@ describe('buildSummaryMessages', () => {
 		expect(user.content).toContain('msg 4 ');
 		expect(user.content.length).toBeLessThan(8 * 1300 + 200);
 	});
+
+	it('summarises the answers, keeping questions short for context only', () => {
+		const [system, user] = buildSummaryMessages(session('s'), [
+			{ id: 'q', sessionId: 's', pdfKey: 'p', seq: 1, role: 'user', content: `Q ${'q'.repeat(2000)}`, createdAt: 1, status: 'complete' },
+			{ id: 'a', sessionId: 's', pdfKey: 'p', seq: 2, role: 'assistant', content: `A ${'a'.repeat(2000)}`, createdAt: 2, status: 'complete' }
+		]);
+		expect(system.content).toContain('assistant’s answers only');
+		expect(user.content).toMatch(/User: Q q{298}…/);
+		expect(user.content).toMatch(/Assistant: A a{1198}…/);
+	});
 });

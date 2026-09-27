@@ -32,8 +32,9 @@ import { OpenRouterError, type StreamEvent, type StreamRequest } from './openRou
  */
 
 export const SUMMARY_PROMPT =
-	'In at most 25 words, state what the user wanted to know about the quoted passage and the ' +
-	'conclusion of the answer. No preamble, no quotation marks.';
+	'In at most 25 words, state the key points the assistant explained about the quoted passage. ' +
+	'Summarize the assistant’s answers only: do not restate or mention the user’s questions, and ' +
+	'do not start with "The user". No preamble, no quotation marks.';
 
 const MAX_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 30_000;
@@ -44,6 +45,8 @@ const CATCH_UP_LIMIT = 3;
 const MIN_MESSAGES = 2;
 const TRANSCRIPT_MESSAGES = 8;
 const MESSAGE_CLIP = 1200;
+/** Questions are there only to make sense of the answers being summarised. */
+const QUESTION_CLIP = 300;
 const QUOTE_CLIP = 500;
 
 export interface SummarySchedulerDeps {
@@ -84,7 +87,9 @@ export function buildSummaryMessages(session: ChatSession, messages: ChatMessage
 	const transcript = messages
 		.filter((m) => m.status === 'complete' && (m.role === 'user' || m.role === 'assistant'))
 		.slice(-TRANSCRIPT_MESSAGES)
-		.map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${clip(m.content, MESSAGE_CLIP)}`)
+		.map((m) =>
+			m.role === 'user' ? `User: ${clip(m.content, QUESTION_CLIP)}` : `Assistant: ${clip(m.content, MESSAGE_CLIP)}`
+		)
 		.join('\n\n');
 	return [
 		{ role: 'system' as const, content: SUMMARY_PROMPT },

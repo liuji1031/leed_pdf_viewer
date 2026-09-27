@@ -74,6 +74,7 @@
 	$: modelReady = $openRouterStatus.state === 'ready';
 	$: parse = $openDocumentParse;
 	$: parsed = $openParsedDocument;
+	$: oldestFirst = [...$chatSessions].sort((a, b) => a.createdAt - b.createdAt);
 	$: highlightById = new Map([...$chatHighlights.values()].flat().map((h) => [h.id, h]));
 
 	$: blockedReason = !$openDocument
@@ -432,7 +433,7 @@
 					{#if $chatLoadState === 'unavailable'}
 						<p class="p-3 text-xs text-amber-700 dark:text-amber-400">Chat history can’t be saved in this browser.</p>
 					{/if}
-					{#each $chatSessions as session (session.id)}
+					{#each oldestFirst as session (session.id)}
 						{@const highlight = highlightById.get(session.highlightId)}
 						<button
 							class="flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50"
@@ -444,9 +445,7 @@
 							</span>
 							<span class="min-w-0 flex-1">
 								<span class="block truncate text-sm text-charcoal dark:text-gray-100">{session.title}</span>
-								<span class="block text-[11px] text-slate dark:text-gray-400">
-									p{session.pageNumber} · {session.messageCount} message{session.messageCount === 1 ? '' : 's'}
-								</span>
+								<span class="block text-[11px] text-slate dark:text-gray-400">p{session.pageNumber}</span>
 								{#if session.summary}
 									<span class="mt-0.5 block text-xs text-slate line-clamp-2 dark:text-gray-400">{session.summary}</span>
 								{/if}

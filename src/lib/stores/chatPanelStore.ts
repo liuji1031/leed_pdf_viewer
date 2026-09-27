@@ -1,9 +1,13 @@
 import { writable } from 'svelte/store';
 import { askRequest } from './chatStore';
+import { drawingState } from './drawingStore';
 
-/** Chat panel layout state, remembered per browser. */
+/**
+ * Chat panel layout state. The width is remembered per browser; whether the
+ * panel is open follows the ask tool: it opens when the tool is chosen and
+ * closes when another tool is.
+ */
 
-const OPEN_KEY = 'leedpdf_chat_panel_open';
 const WIDTH_KEY = 'leedpdf_chat_panel_width';
 
 export const CHAT_PANEL_MIN_WIDTH = 300;
@@ -36,18 +40,26 @@ function stored<T>(key: string, fallback: T, parse: (raw: string) => T | undefin
 	return store;
 }
 
-export const chatPanelOpen = stored(OPEN_KEY, false, (raw) => raw === 'true');
+export const chatPanelOpen = writable(false);
 export const chatPanelWidth = stored(WIDTH_KEY, CHAT_PANEL_DEFAULT_WIDTH, (raw) => {
 	const n = Number(raw);
 	return Number.isFinite(n) && n > 0 ? n : undefined;
 });
 export const chatSettingsOpen = writable(false);
 
-export function toggleChatPanel() {
-	chatPanelOpen.update((open) => !open);
-}
+// only a change of tool opens or closes the panel, so other drawing-state
+// updates (color, line width) leave it as the user left it.
+let lastTool: string | undefined;
+drawingState.subscribe(({ tool }) => {
+	if (tool === lastTool) return;
+	const entering = tool === 'ask';
+	const leaving = lastTool === 'ask';
+	lastTool = tool;
+	if (entering) chatPanelOpen.set(true);
+	else if (leaving) chatPanelOpen.set(false);
+});
 
-// Clicking "Ask" on a selection opens the panel on that question.
+// clicking "Ask" on a selection opens the panel on that question.
 askRequest.subscribe((request) => {
 	if (request) chatPanelOpen.set(true);
 });
