@@ -4,6 +4,7 @@
  */
 
 import { toastStore } from '$lib/stores/toastStore';
+import { newId } from '$lib/utils/uuid';
 import { MAX_FILE_SIZE, MAX_STORAGE_TIME, SESSION_MAX_FILE_SIZE, WARNING_FILE_SIZE } from '$lib/constants';
 
 export interface StoredFileData {
@@ -171,7 +172,7 @@ class FileStorageManager {
       }
 
       // Generate fileId and convert to ArrayBuffer early for potential fallback
-      const fileId = id || crypto.randomUUID();
+      const fileId = id || newId();
       const arrayBuffer = await file.arrayBuffer();
 
       // Try IndexedDB first

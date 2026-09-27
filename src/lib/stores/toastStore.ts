@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import { newId } from '$lib/utils/uuid';
 
 export interface ToastAction {
 	label: string;
@@ -19,7 +20,7 @@ const createToastStore = () => {
 	const { subscribe, update } = writable<Toast[]>([]);
 
 	const addToast = (toast: Omit<Toast, 'id'>) => {
-		const id = crypto.randomUUID();
+		const id = newId();
 		const newToast: Toast = {
 			id,
 			duration: 5000,
