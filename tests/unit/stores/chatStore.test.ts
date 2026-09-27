@@ -2,12 +2,17 @@ import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import {
+	activeSessionId,
+	askRequest,
 	chatLoadState,
 	chatMessages,
 	chatSessions,
 	ensureMessagesLoaded,
+	requestAsk,
+	requestAskInConversation,
 	resetChatStoreForTests,
-	setChatPDFKey
+	setChatPDFKey,
+	type PendingSelection
 } from '../../../src/lib/stores/chatStore';
 import { setCurrentPDF } from '../../../src/lib/stores/drawingStore';
 import {
@@ -62,6 +67,25 @@ beforeEach(() => {
 
 afterEach(() => {
 	resetChatStoreForTests();
+});
+
+describe('chatStore ask requests', () => {
+	const selection = { pageNumber: 3, rects: [], anchor: { text: 'passage' } } as unknown as PendingSelection;
+
+	it('leaves the open conversation to start a new one', () => {
+		activeSessionId.set('open');
+		requestAsk(selection);
+		expect(get(activeSessionId)).toBeNull();
+		expect(get(askRequest)).toMatchObject({ pageNumber: 3 });
+		expect(get(askRequest)?.sessionId).toBeUndefined();
+	});
+
+	it('keeps the conversation open when adding to it', () => {
+		activeSessionId.set('open');
+		requestAskInConversation(selection, 'open');
+		expect(get(activeSessionId)).toBe('open');
+		expect(get(askRequest)).toMatchObject({ pageNumber: 3, sessionId: 'open' });
+	});
 });
 
 describe('chatStore document switching', () => {

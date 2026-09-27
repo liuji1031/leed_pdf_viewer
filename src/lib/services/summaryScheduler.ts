@@ -117,9 +117,11 @@ export function createSummaryScheduler(deps: SummarySchedulerDeps): SummarySched
 		reschedule();
 	}
 
-	function setHighlight(highlightId: string, patch: Partial<ChatHighlight>) {
-		const h = deps.highlights.all().find((x) => x.id === highlightId);
-		if (h) deps.highlights.update({ ...h, ...patch });
+	/** Every passage in the conversation shows the same summary. */
+	function setHighlights(sessionId: string, patch: Partial<ChatHighlight>) {
+		for (const h of deps.highlights.all()) {
+			if (h.sessionId === sessionId) deps.highlights.update({ ...h, ...patch });
+		}
 	}
 
 	async function arm(session: ChatSession, dueAt: number) {
@@ -153,7 +155,7 @@ export function createSummaryScheduler(deps: SummarySchedulerDeps): SummarySched
 			}
 
 			await deps.saveSession({ ...session, summaryState: 'generating' });
-			setHighlight(session.highlightId, { summaryStatus: 'pending' });
+			setHighlights(session.id, { summaryStatus: 'pending' });
 
 			const collect = async (req: StreamRequest) => {
 				let text = '';
@@ -192,7 +194,7 @@ export function createSummaryScheduler(deps: SummarySchedulerDeps): SummarySched
 					summaryDueAt: rearmedFor,
 					summaryError: undefined
 				});
-				setHighlight(session.highlightId, { summaryStatus: 'ready', summary });
+				setHighlights(session.id, { summaryStatus: 'ready', summary });
 			} catch (error) {
 				if (signal.aborted) {
 					// Left the document mid-call: leave it armed to catch up next time.
@@ -210,7 +212,7 @@ export function createSummaryScheduler(deps: SummarySchedulerDeps): SummarySched
 					summaryDueAt: retryAt,
 					summaryError: error instanceof Error ? error.message : String(error)
 				});
-				setHighlight(session.highlightId, { summaryStatus: 'failed' });
+				setHighlights(session.id, { summaryStatus: 'failed' });
 				if (retryAt) {
 					armed.set(sessionId, retryAt);
 					reschedule();

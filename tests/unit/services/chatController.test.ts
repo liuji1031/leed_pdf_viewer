@@ -161,6 +161,44 @@ describe('follow-up questions', () => {
 		expect(highlights[0].messageCount).toBe(4);
 	});
 
+	it('brings another passage into the conversation under the same number', async () => {
+		const other = paper.blocks.find((b) => b.bbox && b.type === 'text' && b.idx !== scaled.idx)!;
+		const added: PendingSelection = {
+			pageNumber: other.pageNumber,
+			rects: [{ x: other.bbox!.x + 0.01, y: other.bbox!.y + 0.005, w: 0.2, h: 0.01 }],
+			anchor: { ...selection.anchor, pageNumber: other.pageNumber, text: other.text.slice(0, 40) }
+		};
+		const { stream, requests } = scriptedStream([{ chunks: ['a'] }, { chunks: ['b'] }, { chunks: ['c'] }]);
+		const c = controller(stream);
+		const id = await c.startConversation(selection, 'Why scale?');
+		await c.startConversation(selection, 'unrelated');
+		pendingSelection.set(added);
+
+		await c.sendMessage(id, 'How do they relate?', { passage: added });
+
+		const mine = highlights.filter((h) => h.sessionId === id);
+		expect(mine.map((h) => [h.ordinal, h.pageNumber, h.messageCount])).toEqual([
+			[1, 2, 4],
+			[1, other.pageNumber, 4]
+		]);
+		expect(get(pendingSelection)).toBeNull();
+
+		const question = (await storage.listMessages(id))[2];
+		expect(question.passage).toMatchObject({
+			quotedText: added.anchor.text,
+			pageNumber: other.pageNumber,
+			highlightId: mine[1].id
+		});
+		expect(question.passage!.contextSnapshot).toContain('<context>');
+		expect(String(requests[2].messages.at(-1)!.content)).toContain(`<selection>${added.anchor.text}</selection>`);
+
+		// later turns resend the added passage with the question that brought it in
+		await c.sendMessage(id, 'And then?');
+		const later = requests[3].messages.map((m) => String(m.content));
+		expect(later.filter((m) => m.includes(`<selection>${added.anchor.text}</selection>`))).toHaveLength(1);
+		expect(later.at(-1)).toBe('And then?');
+	});
+
 	it("leaves the model, key and endpoint to the server's relay", async () => {
 		const { stream, requests } = scriptedStream([{ chunks: ['a'] }]);
 		await controller(stream).startConversation(selection, 'q');

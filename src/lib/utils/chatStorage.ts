@@ -107,6 +107,16 @@ export interface ChatMessage {
 	createdAt: number;
 	status: MessageStatus;
 	usage?: { promptTokens: number; completionTokens: number };
+	/** Another passage the user added to the conversation with this question. */
+	passage?: AddedPassage;
+}
+
+export interface AddedPassage {
+	quotedText: string;
+	pageNumber: number;
+	highlightId: string;
+	/** Frozen like the session's snapshot, so later turns resend it verbatim. */
+	contextSnapshot: string;
 }
 
 /** What the chat and parse caches need from storage, local or on the server. */

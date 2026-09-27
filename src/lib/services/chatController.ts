@@ -8,7 +8,8 @@ import {
 	type PendingSelection
 } from '$lib/stores/chatStore';
 import type { ChatMessage, ChatSession, ChatStorage } from '$lib/utils/chatStorage';
-import { buildMessages, buildSessionContext } from './chatContext';
+import { newId as randomId } from '$lib/utils/uuid';
+import { BUDGET, buildMessages, buildSessionContext, type Turn } from './chatContext';
 import type { ParsedDocument } from './docParser/types';
 import { OpenRouterError, type StreamEvent, type StreamRequest } from './openRouter';
 
@@ -18,6 +19,8 @@ import { OpenRouterError, type StreamEvent, type StreamRequest } from './openRou
  *
  * The highlight and the session are created when the first question is sent,
  * not when "Ask" is clicked — clicking and walking away leaves nothing behind.
+ * A passage added to an existing conversation gets its own highlight, sharing
+ * the conversation's number, when the question that brings it in is sent.
  */
 
 export type ChatErrorKind = 'not_parsed' | 'no_document' | 'unknown_session' | 'busy';
@@ -54,6 +57,8 @@ export interface SendOptions {
 	wholePaper?: boolean;
 	/** data: URL of the rendered page, for multimodal models. */
 	pageImage?: string;
+	/** Another passage to bring into the conversation with this question. */
+	passage?: PendingSelection;
 }
 
 export interface ChatController {
@@ -96,9 +101,18 @@ function friendlyError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+/** A stored message as a prompt turn, with any passage it brought in. */
+export function toTurn(m: ChatMessage): Turn {
+	return {
+		role: m.role as 'user' | 'assistant',
+		content: m.content,
+		...(m.passage && { passage: { snapshot: m.passage.contextSnapshot, quotedText: m.passage.quotedText } })
+	};
+}
+
 export function createChatController(deps: ChatControllerDeps): ChatController {
 	const now = deps.now ?? Date.now;
-	const newId = deps.newId ?? (() => crypto.randomUUID());
+	const newId = deps.newId ?? randomId;
 	const persistEvery = deps.persistIntervalMs ?? 1000;
 
 	const generating = writable<Set<string>>(new Set());
@@ -106,6 +120,8 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 	const controllers = new Map<string, AbortController>();
 
 	const messagesOf = (sessionId: string) => get(chatMessages).get(sessionId) ?? [];
+	const highlightsOf = (sessionId: string) => deps.highlights.all().filter((h) => h.sessionId === sessionId);
+	const nextOrdinal = () => deps.highlights.all().reduce((max, h) => Math.max(max, h.ordinal), 0) + 1;
 
 	function setMessage(message: ChatMessage) {
 		chatMessages.update((map) => {
@@ -141,7 +157,6 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 		const highlightId = newId();
 		const quotedText = selection.anchor.text;
 
-		const ordinal = deps.highlights.all().reduce((max, h) => Math.max(max, h.ordinal), 0) + 1;
 		deps.highlights.add({
 			id: highlightId,
 			pageNumber: selection.pageNumber,
@@ -149,7 +164,7 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 			rects: selection.rects,
 			anchor: selection.anchor,
 			createdAt,
-			ordinal,
+			ordinal: nextOrdinal(),
 			summaryStatus: 'none',
 			messageCount: 0
 		});
@@ -188,6 +203,30 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 		const prior = messagesOf(sessionId).filter((m) => m.status === 'complete' && m.role !== 'system');
 		let seq = messagesOf(sessionId).reduce((max, m) => Math.max(max, m.seq), 0);
 
+		let passage: ChatMessage['passage'];
+		if (options.passage) {
+			const selection = options.passage;
+			const highlightId = newId();
+			deps.highlights.add({
+				id: highlightId,
+				pageNumber: selection.pageNumber,
+				sessionId,
+				rects: selection.rects,
+				anchor: selection.anchor,
+				createdAt: now(),
+				ordinal: highlightsOf(sessionId)[0]?.ordinal ?? nextOrdinal(),
+				summaryStatus: 'none',
+				messageCount: messagesOf(sessionId).length
+			});
+			passage = {
+				quotedText: selection.anchor.text,
+				pageNumber: selection.pageNumber,
+				highlightId,
+				contextSnapshot: buildSessionContext(parsed, selection, BUDGET.addedWindow).snapshot
+			};
+			clearPendingSelection();
+		}
+
 		const userMessage: ChatMessage = {
 			id: newId(),
 			sessionId,
@@ -196,7 +235,8 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 			role: 'user',
 			content: question,
 			createdAt: now(),
-			status: 'complete'
+			status: 'complete',
+			...(passage && { passage })
 		};
 		setMessage(userMessage);
 		await deps.storage.putMessage(userMessage);
@@ -224,8 +264,9 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 				quotedText: session.quotedText,
 				focusBlockIdx: session.focusBlockIdx ?? null
 			},
-			history: prior.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+			history: prior.map(toTurn),
 			question,
+			passage: passage && { snapshot: passage.contextSnapshot, quotedText: passage.quotedText },
 			wholePaper: options.wholePaper,
 			pageImage: options.pageImage
 		});
@@ -273,8 +314,7 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 		const messageCount = messagesOf(sessionId).length;
 		const latest = get(chatSessions).find((s) => s.id === sessionId) ?? session;
 		await saveSession({ ...latest, messageCount, updatedAt: now(), model: answeredBy ?? latest.model });
-		const highlight = deps.highlights.all().find((h) => h.id === session.highlightId);
-		if (highlight) deps.highlights.update({ ...highlight, messageCount });
+		for (const highlight of highlightsOf(sessionId)) deps.highlights.update({ ...highlight, messageCount });
 
 		if (current.status === 'complete') answerCompleted.set({ sessionId, at: now() });
 	}

@@ -41,11 +41,13 @@
 		parseQueue
 	} from '$lib/services/documentParsing';
 	import { chat } from '$lib/services/chatService';
-	import { ChatError } from '$lib/services/chatController';
-	import { buildMessages, buildSessionContext } from '$lib/services/chatContext';
+	import { ChatError, toTurn } from '$lib/services/chatController';
+	import { BUDGET, buildMessages, buildSessionContext } from '$lib/services/chatContext';
+	import { ADDED_PASSAGE_PROMPTS, NEW_CONVERSATION_PROMPTS } from '$lib/services/quickPrompts';
 	import type { ParseErrorKind } from '$lib/services/docParser/mineruClient';
 	import ChatComposer from './ChatComposer.svelte';
 	import ChatMessageView from './ChatMessageView.svelte';
+	import ChatQuickPrompts from './ChatQuickPrompts.svelte';
 	import ChatSettingsModal from './ChatSettingsModal.svelte';
 
 	/** Navigate the viewer; routes pass their PDFViewer's goToPage. */
@@ -62,7 +64,11 @@
 	$: activeSession = $chatSessions.find((s) => s.id === $activeSessionId) ?? null;
 	$: messages = activeSession ? ($chatMessages.get(activeSession.id) ?? []) : [];
 	$: busy = activeSession ? $generating.has(activeSession.id) : false;
-	$: pendingAsk = !activeSession ? $askRequest : null;
+	/** A passage to start a new conversation about. */
+	$: pendingAsk = $askRequest && !$askRequest.sessionId ? $askRequest : null;
+	/** A passage to bring into the open conversation with the next question. */
+	$: pendingAdd = $askRequest?.sessionId && $askRequest.sessionId === activeSession?.id ? $askRequest : null;
+	$: pendingPassage = pendingAsk ?? pendingAdd;
 	// Re-checked whenever the panel opens, so an edited .env shows up after a restart.
 	$: if ($chatPanelOpen) void refreshOpenRouterStatus();
 	$: modelReady = $openRouterStatus.state === 'ready';
@@ -85,12 +91,15 @@
 	// Opening a conversation loads its messages; new messages scroll into view.
 	$: if ($activeSessionId) ensureMessagesLoaded($activeSessionId).catch(() => {});
 	$: if (messages) scrollToEnd();
-	$: if (pendingAsk) composer?.focus();
+	$: if (pendingPassage) {
+		composer?.focus();
+		scrollToEnd();
+	}
 
 	// Suggest the page image when the passage involves something text can't
 	// carry: an equation the parser couldn't transcribe, or a figure.
-	$: if (pendingAsk && parsed) attachPage = needsPageImage(parsed, pendingAsk);
-	function needsPageImage(doc: NonNullable<typeof parsed>, ask: NonNullable<typeof pendingAsk>): boolean {
+	$: if (pendingPassage && parsed) attachPage = needsPageImage(parsed, pendingPassage);
+	function needsPageImage(doc: NonNullable<typeof parsed>, ask: NonNullable<typeof pendingPassage>): boolean {
 		try {
 			const snapshot = buildSessionContext(doc, ask).snapshot;
 			return snapshot.includes('[equation — not transcribed') || /\[passage block\]\n\[figure/.test(snapshot);
@@ -115,11 +124,12 @@
 	}
 
 	// ---- Size of what will be sent -------------------------------------------
-	$: contextNote = estimate(parsed, pendingAsk, activeSession, messages, wholePaper);
+	$: contextNote = estimate(parsed, pendingAsk, pendingAdd, activeSession, messages, wholePaper);
 
 	function estimate(
 		doc: typeof parsed,
 		ask: typeof pendingAsk,
+		add: typeof pendingAdd,
 		session: typeof activeSession,
 		msgs: typeof messages,
 		whole: boolean
@@ -136,10 +146,11 @@
 							quotedText: session!.quotedText,
 							focusBlockIdx: session!.focusBlockIdx ?? null
 						},
-				history: msgs
-					.filter((m) => m.status === 'complete' && m.role !== 'system')
-					.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+				history: msgs.filter((m) => m.status === 'complete' && m.role !== 'system').map(toTurn),
 				question: '',
+				passage: add
+					? { snapshot: buildSessionContext(doc, add, BUDGET.addedWindow).snapshot, quotedText: add.anchor.text }
+					: undefined,
 				wholePaper: whole
 			});
 			const chars = built.reduce((n, m) => n + (typeof m.content === 'string' ? m.content.length : 0), 0);
@@ -164,10 +175,13 @@
 				sendError = error instanceof ChatError ? error.message : String(error);
 			}
 		} else if (activeSession) {
+			const passage = pendingAdd;
+			if (passage) askRequest.set(null);
 			try {
-				const pageImage = await pageImageFor(activeSession.pageNumber);
-				await chat.sendMessage(activeSession.id, text, { wholePaper, pageImage });
+				const pageImage = await pageImageFor(passage?.pageNumber ?? activeSession.pageNumber);
+				await chat.sendMessage(activeSession.id, text, { wholePaper, pageImage, passage: passage ?? undefined });
 			} catch (error) {
+				if (passage) askRequest.set(passage);
 				sendError = error instanceof ChatError ? error.message : String(error);
 			}
 		}
@@ -377,17 +391,35 @@
 						<span class="not-italic text-gray-400"> · p{(pendingAsk ?? activeSession)?.pageNumber}</span>
 					</button>
 					{#each messages as message (message.id)}
-						<ChatMessageView {message} />
+						<ChatMessageView {message} {onGoToPage} />
 					{/each}
+					{#if pendingAdd}
+						<div class="flex items-start gap-2 rounded-lg border border-dashed border-indigo-300 bg-indigo-50/40 px-3 py-2 text-xs dark:border-indigo-500/40 dark:bg-indigo-500/10" data-testid="chat-pending-passage">
+							<span class="flex-1 text-charcoal dark:text-gray-200">
+								<span class="mb-0.5 block font-medium not-italic text-indigo-600 dark:text-indigo-300">Adding to this conversation · p{pendingAdd.pageNumber}</span>
+								<span class="italic">“{pendingAdd.anchor.text}”</span>
+							</span>
+							<button class="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700" on:click={() => askRequest.set(null)} aria-label="Don’t add this passage">
+								<X size={14} />
+							</button>
+						</div>
+					{/if}
 					{#if sendError}
 						<p class="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300">{sendError}</p>
 					{/if}
 				</div>
+				{#if pendingPassage}
+					<ChatQuickPrompts
+						prompts={pendingAdd ? ADDED_PASSAGE_PROMPTS : NEW_CONVERSATION_PROMPTS}
+						disabled={busy || !!blockedReason}
+						onPick={send}
+					/>
+				{/if}
 				<ChatComposer
 					bind:this={composer}
 					bind:wholePaper
 					bind:attachPage
-					placeholder={pendingAsk ? 'Ask about this passage…' : 'Ask a follow-up…'}
+					placeholder={pendingAsk ? 'Ask about this passage…' : pendingAdd ? 'Ask about the added passage…' : 'Ask a follow-up…'}
 					{blockedReason}
 					{busy}
 					{contextNote}

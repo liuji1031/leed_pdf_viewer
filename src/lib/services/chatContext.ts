@@ -8,7 +8,9 @@
  *                 the surrounding blocks, referenced figures/tables, resolved
  *                 citations — then the selection and the question. Frozen when
  *                 the conversation starts, so follow-ups reuse it verbatim.
- *   follow-ups    the question alone.
+ *   follow-ups    the question alone, or — when the user adds another passage
+ *                 to the conversation — that passage's own, smaller snapshot,
+ *                 the selection and the question. Also frozen and resent.
  *
  * Budgets are in characters (≈4 per token). Whole blocks only: a half-sentence
  * or half a formula is worse than none.
@@ -27,6 +29,8 @@ export const BUDGET = {
 	skeleton: 4800,
 	abstract: 1800,
 	window: 12000,
+	/** Surroundings of a passage added mid-conversation; resent every turn. */
+	addedWindow: 4000,
 	citations: 1600,
 	wholePaper: 120_000
 } as const;
@@ -282,7 +286,11 @@ export interface SessionContext {
 }
 
 /** The per-conversation context: location, surrounding text, citations. */
-export function buildSessionContext(doc: ParsedDocument, sel: SelectionContext): SessionContext {
+export function buildSessionContext(
+	doc: ParsedDocument,
+	sel: SelectionContext,
+	windowBudget: number = BUDGET.window
+): SessionContext {
 	const home = findBlockForSelection(doc, sel);
 	const lines: string[] = ['<context>'];
 	const tiers: ContextTier[] = [];
@@ -295,7 +303,7 @@ export function buildSessionContext(doc: ParsedDocument, sel: SelectionContext):
 	tiers.push({ name: 'passage location', tokens: estimateTokens(location) });
 
 	if (home) {
-		const window = selectWindow(doc, home.idx);
+		const window = selectWindow(doc, home.idx, windowBudget);
 		const text = window
 			.map((b) => (b.idx === home.idx ? `[passage block]\n${renderBlock(b)}` : renderBlock(b)))
 			.join('\n\n');
@@ -338,13 +346,27 @@ export function documentMarkdown(doc: ParsedDocument, budget: number = BUDGET.wh
 	return parts.join('\n\n');
 }
 
+/** A passage added to the conversation after it started. */
+export interface TurnPassage {
+	snapshot: string;
+	quotedText: string;
+}
+
+export interface Turn {
+	role: 'user' | 'assistant';
+	content: string;
+	passage?: TurnPassage;
+}
+
 export interface MessagesInput {
 	doc: ParsedDocument;
 	/** Frozen when the conversation started. */
 	session: { snapshot: string; quotedText: string; focusBlockIdx: number | null };
 	/** Earlier turns, oldest first, excluding the question being asked now. */
-	history: { role: 'user' | 'assistant'; content: string }[];
+	history: Turn[];
 	question: string;
+	/** A passage added with this question. */
+	passage?: TurnPassage;
 	wholePaper?: boolean;
 	/** data: URL of the rendered page, for multimodal models. */
 	pageImage?: string;
@@ -358,9 +380,14 @@ export function buildMessages(input: MessagesInput): OpenRouterMessage[] {
 	if (input.wholePaper) system += `\n\n<full_text>\n${documentMarkdown(doc)}\n</full_text>`;
 
 	const opening = (q: string) => `${session.snapshot}\n\n<selection>${session.quotedText}</selection>\n\n${q}`;
+	const withPassage = (t: Turn) =>
+		t.passage
+			? `Another passage from the paper, added to this conversation:\n${t.passage.snapshot}\n\n` +
+				`<selection>${t.passage.quotedText}</selection>\n\n${t.content}`
+			: t.content;
 
 	// The first user turn is pinned: it carries the conversation's context.
-	const turns = [...history, { role: 'user' as const, content: question }];
+	const turns: Turn[] = [...history, { role: 'user', content: question, passage: input.passage }];
 	const first = turns[0];
 	const keep = (input.maxHistoryTurns ?? 12) * 2;
 	const rest = turns.slice(1);
@@ -369,7 +396,7 @@ export function buildMessages(input: MessagesInput): OpenRouterMessage[] {
 	const messages: OpenRouterMessage[] = [
 		{ role: 'system', content: system },
 		{ role: 'user', content: opening(first.content) },
-		...kept.map((t) => ({ role: t.role, content: t.content }))
+		...kept.map((t) => ({ role: t.role, content: withPassage(t) }))
 	];
 
 	if (input.pageImage) {

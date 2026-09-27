@@ -1,6 +1,13 @@
 <script lang="ts">
-	import { MessageSquareQuote } from 'lucide-svelte';
-	import { pendingSelection, requestAsk } from '$lib/stores/chatStore';
+	import { MessageSquarePlus, MessageSquareQuote } from 'lucide-svelte';
+	import {
+		activeSessionId,
+		chatSessions,
+		pendingSelection,
+		requestAsk,
+		requestAskInConversation
+	} from '$lib/stores/chatStore';
+	import { chatPanelOpen } from '$lib/stores/chatPanelStore';
 	import { normRectToDisplay } from '$lib/utils/textAnchor';
 	import type { RotationAngle } from '$lib/utils/rotationUtils';
 
@@ -41,8 +48,18 @@
 		return { left: Math.max(0, Math.min(anchorRect.left, canvasWidth - 40)), top };
 	})();
 
+	// Offered only while a conversation is open in the panel.
+	$: currentSessionId =
+		$chatPanelOpen && $activeSessionId && $chatSessions.some((s) => s.id === $activeSessionId)
+			? $activeSessionId
+			: null;
+
 	function ask() {
 		if (selection) requestAsk(selection);
+	}
+
+	function askInConversation() {
+		if (selection && currentSessionId) requestAskInConversation(selection, currentSessionId);
 	}
 </script>
 
@@ -57,22 +74,41 @@
 	</div>
 
 	<!--
-		mousedown is prevented so clicking the chip doesn't clear the native
-		selection; pointerdown stops at the chip so a touch can't start a page pan.
+		mousedown is prevented so clicking the chips doesn't clear the native
+		selection; pointerdown stops at the chips so a touch can't start a page pan.
 	-->
-	<button
-		type="button"
-		class="ask-chip absolute flex items-center gap-1.5 rounded-full bg-sage px-3 text-sm font-medium text-white shadow-lg hover:brightness-110"
+	<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+	<div
+		class="ask-chips absolute flex items-center gap-1.5"
 		style="left: {chipPosition.left}px; top: {chipPosition.top}px; height: {CHIP_HEIGHT}px;"
+		role="group"
+		aria-label="Ask about the selection"
 		on:mousedown|preventDefault
 		on:pointerdown|stopPropagation
-		on:click={ask}
-		aria-label={`Ask about "${selection.anchor.text}"`}
-		data-testid="ask-selection-chip"
 	>
-		<MessageSquareQuote size={14} />
-		<span class="ask-chip-quote">Ask about “{quote}”</span>
-	</button>
+		<button
+			type="button"
+			class="ask-chip flex h-full min-w-0 items-center gap-1.5 rounded-full bg-sage px-3 text-sm font-medium text-white shadow-lg hover:brightness-110"
+			on:click={ask}
+			aria-label={`Ask about "${selection.anchor.text}" in a new conversation`}
+			data-testid="ask-selection-chip"
+		>
+			<MessageSquareQuote size={14} class="shrink-0" />
+			<span class="ask-chip-quote">Ask about “{quote}”</span>
+		</button>
+		{#if currentSessionId}
+			<button
+				type="button"
+				class="flex h-full shrink-0 items-center gap-1.5 rounded-full border border-sage bg-white px-3 text-sm font-medium text-sage shadow-lg hover:bg-sage/10 dark:bg-gray-800"
+				on:click={askInConversation}
+				aria-label={`Ask about "${selection.anchor.text}" in the current conversation`}
+				data-testid="ask-in-conversation-chip"
+			>
+				<MessageSquarePlus size={14} class="shrink-0" />
+				<span>Ask in current conversation</span>
+			</button>
+		{/if}
+	</div>
 {/if}
 
 <style>
@@ -86,10 +122,13 @@
 		border-radius: 2px;
 	}
 
-	.ask-chip {
+	.ask-chips {
 		z-index: 13;
-		max-width: 22rem;
 		white-space: nowrap;
+	}
+
+	.ask-chip {
+		max-width: 22rem;
 	}
 
 	.ask-chip-quote {

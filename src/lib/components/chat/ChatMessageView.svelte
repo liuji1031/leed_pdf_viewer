@@ -3,10 +3,23 @@
 	import ChatMarkdown from './ChatMarkdown.svelte';
 
 	export let message: ChatMessage;
+	export let onGoToPage: (page: number) => void = () => {};
 </script>
 
 {#if message.role === 'user'}
-	<div class="flex justify-end" data-testid="chat-message-user">
+	<div class="flex flex-col items-end gap-1" data-testid="chat-message-user">
+		{#if message.passage}
+			{@const passage = message.passage}
+			<button
+				class="max-w-[85%] rounded-lg border-l-4 border-indigo-400 bg-indigo-50/60 px-3 py-1.5 text-left text-xs italic text-charcoal hover:bg-indigo-50 dark:bg-indigo-500/10 dark:text-gray-200"
+				on:click={() => onGoToPage(passage.pageNumber)}
+				title="Go to this passage"
+				data-testid="chat-message-passage"
+			>
+				“{passage.quotedText}”
+				<span class="not-italic text-gray-400"> · p{passage.pageNumber}</span>
+			</button>
+		{/if}
 		<div class="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-sage/15 px-3 py-2 text-sm text-charcoal dark:bg-sage/25 dark:text-gray-100">
 			{message.content}
 		</div>

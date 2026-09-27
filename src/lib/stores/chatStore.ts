@@ -23,15 +23,26 @@ export interface PendingSelection {
  */
 export const pendingSelection = writable<PendingSelection | null>(null);
 
-/** A request to start a conversation about a selection. Consumed by the chat panel. */
-export const askRequest = writable<(PendingSelection & { requestedAt: number }) | null>(null);
+/**
+ * A request to ask about a selection, consumed by the chat panel: in a new
+ * conversation, or — with `sessionId` — in that existing one.
+ */
+export const askRequest = writable<(PendingSelection & { requestedAt: number; sessionId?: string }) | null>(null);
 
 export function clearPendingSelection() {
 	pendingSelection.set(null);
 }
 
+/** Start a new conversation about the selection, leaving any open one. */
 export function requestAsk(selection: PendingSelection) {
+	activeSessionId.set(null);
 	askRequest.set({ ...selection, requestedAt: Date.now() });
+}
+
+/** Bring the selection into an existing conversation. */
+export function requestAskInConversation(selection: PendingSelection, sessionId: string) {
+	activeSessionId.set(sessionId);
+	askRequest.set({ ...selection, requestedAt: Date.now(), sessionId });
 }
 
 // ---------------------------------------------------------------------------
