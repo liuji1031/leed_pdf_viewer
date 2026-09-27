@@ -23,7 +23,10 @@ import type { NormRect, TextAnchor } from '$lib/utils/textAnchor';
 export const SYSTEM_PROMPT =
 	'You are a research-paper reading assistant. The user is reading the paper below and asks ' +
 	'about passages they select. Ground answers in the paper and say when you draw on outside ' +
-	'knowledge instead. Be concise and concrete. Use LaTeX for math ($…$ inline, $$…$$ display).';
+	'knowledge instead. Answer only the question asked: keep it short (a few sentences or a ' +
+	'brief list), with no headings and no extra sections such as background, comparisons or ' +
+	'"why it matters" unless the user asks for them. Be concrete. Use LaTeX for math ' +
+	'($…$ inline, $$…$$ display).';
 
 export const BUDGET = {
 	skeleton: 4800,
