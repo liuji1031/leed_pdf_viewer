@@ -34,7 +34,9 @@ const exchange = (sessionId: string): ChatMessage[] => [
 	{ id: `${sessionId}-2`, sessionId, pdfKey: 'p', seq: 2, role: 'assistant', content: 'To keep gradients healthy.', createdAt: 2, status: 'complete' }
 ];
 
-function harness(opts: { settings?: Partial<ChatSettings>; fail?: boolean; hang?: boolean } = {}) {
+function harness(
+	opts: { settings?: Partial<ChatSettings>; fail?: boolean; hang?: boolean; mustReason?: boolean } = {}
+) {
 	const sessions = new Map<string, ChatSession>();
 	const messages = new Map<string, ChatMessage[]>();
 	let highlights: ChatHighlight[] = [];
@@ -49,6 +51,9 @@ function harness(opts: { settings?: Partial<ChatSettings>; fail?: boolean; hang?
 			);
 		}
 		if (opts.fail) throw new OpenRouterError('server', 'boom');
+		if (opts.mustReason && req.disableReasoning) {
+			throw new OpenRouterError('bad_request', 'Reasoning is mandatory for this endpoint and cannot be disabled.', 400);
+		}
 		yield { type: 'delta', text: '"Asked why logits are scaled; ' };
 		yield { type: 'delta', text: 'answer: to keep softmax gradients healthy."' };
 		yield { type: 'done' };
@@ -154,7 +159,7 @@ describe('summary scheduling', () => {
 		h.scheduler.onNewSelection();
 		await h.scheduler.idle();
 		const req = h.calls[0];
-		expect(req).toMatchObject({ purpose: 'summary', maxTokens: 120, temperature: 0.2 });
+		expect(req).toMatchObject({ purpose: 'summary', maxTokens: 120, temperature: 0.2, disableReasoning: true });
 		expect(req).not.toHaveProperty('model');
 		expect(req.messages[0]).toEqual({ role: 'system', content: SUMMARY_PROMPT });
 		expect(req.messages[1].content).toContain('Passage: "passage a"');
@@ -193,7 +198,7 @@ describe('summary skips and failures', () => {
 		expect(h.state('a')).toBe('idle');
 	});
 
-	it('marks a failure, allows one retry, then gives up', async () => {
+	it('retries a failure once, 30 seconds later, then gives up', async () => {
 		const h = harness({ fail: true });
 		h.add(session('a'));
 		await h.scheduler.onAnswerComplete('a');
@@ -202,12 +207,28 @@ describe('summary skips and failures', () => {
 		expect(h.state('a')).toBe('failed');
 		expect(h.highlight('a').summaryStatus).toBe('failed');
 
-		h.sessions.set('a', { ...h.sessions.get('a')!, summaryState: 'failed' });
-		await vi.advanceTimersByTimeAsync(0);
-		// A retry via the generic path: failed with attempts < max is eligible.
-		await h.scheduler.requestNow('a');
-		expect(h.state('a')).toBe('failed');
+		await vi.advanceTimersByTimeAsync(29_000);
+		expect(h.calls).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(1_000);
+		await h.scheduler.idle();
 		expect(h.calls).toHaveLength(2);
+		expect(h.state('a')).toBe('skipped');
+
+		await vi.advanceTimersByTimeAsync(IDLE * 2);
+		expect(h.calls).toHaveLength(2);
+	});
+
+	it('asks a model that must reason again, with room to reason', async () => {
+		const h = harness({ mustReason: true });
+		h.add(session('a'));
+		await h.scheduler.onAnswerComplete('a');
+		h.scheduler.onNewSelection();
+		await h.scheduler.idle();
+		expect(h.calls.map((c) => [c.disableReasoning, c.maxTokens])).toEqual([
+			[true, 120],
+			[undefined, 2_000]
+		]);
+		expect(h.state('a')).toBe('ready');
 	});
 
 	it('leaves an interrupted summary armed when the document is left', async () => {
@@ -248,6 +269,18 @@ describe('catching up when a document is reopened', () => {
 		await vi.advanceTimersByTimeAsync(30_000);
 		await h.scheduler.idle();
 		expect(h.state('later')).toBe('ready');
+	});
+
+	it('retries a summary that failed before the reload, but not one out of attempts', async () => {
+		const h = harness();
+		h.add(session('once', { summaryState: 'failed', summaryAttempts: 1, summaryError: 'Empty summary' }));
+		h.add(session('twice', { summaryState: 'skipped', summaryAttempts: 2 }));
+		await h.scheduler.attach([...h.sessions.values()]);
+		await h.scheduler.idle();
+		expect(h.calls).toHaveLength(1);
+		expect(h.state('once')).toBe('ready');
+		expect(h.highlight('once')).toMatchObject({ summaryStatus: 'ready' });
+		expect(h.state('twice')).toBe('skipped');
 	});
 });
 

@@ -2,7 +2,7 @@ import type { ChatSession } from '$lib/utils/chatStorage';
 import type { ChatMessage } from '$lib/utils/chatStorage';
 import type { ChatHighlight } from '$lib/stores/drawingStore';
 import type { ChatSettings } from '$lib/stores/chatSettingsStore';
-import type { StreamEvent, StreamRequest } from './openRouter';
+import { OpenRouterError, type StreamEvent, type StreamRequest } from './openRouter';
 
 /**
  * When to summarise a conversation for its highlight's hover card.
@@ -13,7 +13,7 @@ import type { StreamEvent, StreamRequest } from './openRouter';
  *
  * States (persisted on the session, so a pending summary survives a reload):
  *   idle ─answer done─▶ armed ─deadline or new selection─▶ generating ─▶ ready
- *                         ▲ another answer pushes the deadline out   └─▶ failed (retry once) ─▶ skipped
+ *                         ▲ another answer pushes the deadline out   └─▶ failed ─retry after 30 s─▶ skipped
  *
  * What counts as activity: finishing an answer (re-arms the deadline).
  * What doesn't: hovering highlights, scrolling, paging, zooming, opening the
@@ -22,6 +22,11 @@ import type { StreamEvent, StreamRequest } from './openRouter';
  * Cost control: short conversations are skipped, the transcript is clipped,
  * answers are capped at ~25 words, at most two attempts, and when a document
  * is reopened only the three most recent overdue summaries are caught up.
+ *
+ * Reasoning is turned off: reasoning tokens count against the 120-token cap,
+ * and a reasoning model (Kimi K2.6, measured) spends all of it thinking and
+ * returns nothing. A model that can't turn reasoning off rejects the request;
+ * it is then asked again with reasoning and room for it.
  */
 
 export const SUMMARY_PROMPT =
@@ -29,6 +34,9 @@ export const SUMMARY_PROMPT =
 	'conclusion of the answer. No preamble, no quotation marks.';
 
 const MAX_ATTEMPTS = 2;
+const RETRY_DELAY_MS = 30_000;
+const SUMMARY_MAX_TOKENS = 120;
+const REASONING_MAX_TOKENS = 2_000;
 const CATCH_UP_LIMIT = 3;
 const MIN_MESSAGES = 2;
 const TRANSCRIPT_MESSAGES = 8;
@@ -59,6 +67,11 @@ export interface SummaryScheduler {
 	requestNow(sessionId: string): Promise<void>;
 	/** Resolves when in-flight summaries are done (tests). */
 	idle(): Promise<void>;
+}
+
+/** The model refused to turn reasoning off. */
+function mustReason(error: unknown): boolean {
+	return error instanceof OpenRouterError && error.kind === 'bad_request' && /reason/i.test(error.message);
 }
 
 export function buildSummaryMessages(session: ChatSession, messages: ChatMessage[]) {
@@ -137,16 +150,27 @@ export function createSummaryScheduler(deps: SummarySchedulerDeps): SummarySched
 			await deps.saveSession({ ...session, summaryState: 'generating' });
 			setHighlight(session.highlightId, { summaryStatus: 'pending' });
 
+			const collect = async (req: StreamRequest) => {
+				let text = '';
+				for await (const event of deps.stream(req)) {
+					if (event.type === 'delta') text += event.text;
+				}
+				return text;
+			};
+			const base = {
+				purpose: 'summary',
+				messages: buildSummaryMessages(session, messages),
+				temperature: 0.2,
+				signal
+			} satisfies StreamRequest;
+
 			let summary = '';
 			try {
-				for await (const event of deps.stream({
-					purpose: 'summary',
-					messages: buildSummaryMessages(session, messages),
-					maxTokens: 120,
-					temperature: 0.2,
-					signal
-				})) {
-					if (event.type === 'delta') summary += event.text;
+				try {
+					summary = await collect({ ...base, maxTokens: SUMMARY_MAX_TOKENS, disableReasoning: true });
+				} catch (error) {
+					if (!mustReason(error)) throw error;
+					summary = await collect({ ...base, maxTokens: REASONING_MAX_TOKENS });
 				}
 				summary = summary.trim().replace(/^["“]|["”]$/g, '');
 				if (!summary) throw new Error('Empty summary');
@@ -172,13 +196,19 @@ export function createSummaryScheduler(deps: SummarySchedulerDeps): SummarySched
 				}
 				const attempts = session.summaryAttempts + 1;
 				const latest = (await deps.getSession(sessionId)) ?? session;
+				const retryAt = attempts < MAX_ATTEMPTS ? now() + RETRY_DELAY_MS : undefined;
 				await deps.saveSession({
 					...latest,
-					summaryState: attempts >= MAX_ATTEMPTS ? 'skipped' : 'failed',
+					summaryState: retryAt ? 'failed' : 'skipped',
 					summaryAttempts: attempts,
+					summaryDueAt: retryAt,
 					summaryError: error instanceof Error ? error.message : String(error)
 				});
 				setHighlight(session.highlightId, { summaryStatus: 'failed' });
+				if (retryAt) {
+					armed.set(sessionId, retryAt);
+					reschedule();
+				}
 				console.warn(`Summary for ${sessionId} failed:`, error);
 			}
 		})().finally(() => inFlight.delete(sessionId));
@@ -189,7 +219,12 @@ export function createSummaryScheduler(deps: SummarySchedulerDeps): SummarySched
 	return {
 		async attach(sessions) {
 			const t = now();
-			const pending = sessions.filter((s) => s.summaryState === 'armed' || s.summaryState === 'generating');
+			const pending = sessions.filter(
+				(s) =>
+					s.summaryState === 'armed' ||
+					s.summaryState === 'generating' ||
+					(s.summaryState === 'failed' && s.summaryAttempts < MAX_ATTEMPTS)
+			);
 			// A summary cut off mid-call by a reload is due immediately.
 			const withDue = pending.map((s) => ({
 				s,

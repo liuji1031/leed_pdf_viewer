@@ -113,6 +113,13 @@ describe('streamChat', () => {
 		});
 	});
 
+	it("turns the model's reasoning off when asked", async () => {
+		const fetchImpl = vi.fn(async () => sseResponse([DONE]).response);
+		await collect(streamChat(request(fetchImpl, { disableReasoning: true })));
+		const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+		expect(JSON.parse(init.body as string).reasoning).toEqual({ enabled: false });
+	});
+
 	it('posts summaries to the summary route and honours another endpoint', async () => {
 		const fetchImpl = vi.fn(async () => sseResponse([DONE]).response);
 		await collect(streamChat(request(fetchImpl, { purpose: 'summary', endpoint: 'https://x.test/v1/' })));
