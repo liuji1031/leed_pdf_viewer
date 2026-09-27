@@ -1,12 +1,8 @@
 import { get, writable } from 'svelte/store';
 import type { NormRect, TextAnchor } from '$lib/utils/textAnchor';
-import {
-	chatStorage,
-	type ChatMessage,
-	type ChatSession,
-	type ChatStorageManager
-} from '$lib/utils/chatStorage';
+import type { ChatMessage, ChatSession, ChatStorage } from '$lib/utils/chatStorage';
 import { activePDFKey } from '$lib/stores/drawingStore';
+import { paperStorage } from '$lib/services/paperStorage';
 
 // ---------------------------------------------------------------------------
 // Selection
@@ -65,7 +61,7 @@ const messageLoads = new Map<string, Promise<void>>();
  */
 export async function setChatPDFKey(
 	pdfKey: string | null,
-	storage: ChatStorageManager = chatStorage
+	storage: ChatStorage = paperStorage
 ): Promise<void> {
 	if (pdfKey === loadedPdfKey && get(chatLoadState) !== 'idle') return;
 	const g = ++generation;
@@ -97,7 +93,7 @@ export async function setChatPDFKey(
 /** Load a session's messages once; concurrent and repeat calls share the first load. */
 export function ensureMessagesLoaded(
 	sessionId: string,
-	storage: ChatStorageManager = chatStorage
+	storage: ChatStorage = paperStorage
 ): Promise<void> {
 	if (get(chatMessages).has(sessionId)) return Promise.resolve();
 	const existing = messageLoads.get(sessionId);

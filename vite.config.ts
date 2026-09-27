@@ -1,6 +1,7 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { enhancedImages } from '@sveltejs/enhanced-img';
 import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
 
 export const dropConsoleAndDebug = (import.meta.env?.VITE_BUILDING_TAURI === 'true') as boolean || !((import.meta.env?.VITE_DEV_MODE === 'true') as boolean)
 
@@ -22,6 +23,10 @@ export default defineConfig({
 		host: true,
 		fs: {
 			allow: ['..', 'node_modules/pdfjs-dist']
+		},
+		watch: {
+			// The paper database (see docker-compose.yml) is written on every save.
+			ignored: [fileURLToPath(new URL('./data', import.meta.url)) + '/**']
 		},
 		hmr: {
 			// The HMR websocket address is resolved by the *browser*, so in a

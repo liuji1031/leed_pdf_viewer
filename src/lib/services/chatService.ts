@@ -8,7 +8,7 @@ import {
 	updateChatHighlight
 } from '$lib/stores/drawingStore';
 import { chatLoadState, chatSessions, pendingSelection } from '$lib/stores/chatStore';
-import { chatStorage } from '$lib/utils/chatStorage';
+import { paperStorage } from './paperStorage';
 import { createChatController } from './chatController';
 import { openDocument, openParsedDocument } from './documentParsing';
 import { streamChat } from './openRouter';
@@ -16,7 +16,7 @@ import { createSummaryScheduler } from './summaryScheduler';
 
 /** The app's conversation controller, wired to real storage and OpenRouter. */
 export const chat = createChatController({
-	storage: chatStorage,
+	storage: paperStorage,
 	stream: streamChat,
 	getDocument: () => {
 		const open = get(openDocument);
@@ -34,12 +34,12 @@ export const chat = createChatController({
 export const summaries = createSummaryScheduler({
 	getSettings: () => get(chatSettings),
 	stream: streamChat,
-	getSession: async (id) => get(chatSessions).find((s) => s.id === id) ?? chatStorage.getSession(id),
+	getSession: async (id) => get(chatSessions).find((s) => s.id === id) ?? paperStorage.getSession(id),
 	saveSession: async (session) => {
 		chatSessions.update((list) => list.map((s) => (s.id === session.id ? session : s)));
-		await chatStorage.putSession(session);
+		await paperStorage.putSession(session);
 	},
-	listMessages: (id) => chatStorage.listMessages(id),
+	listMessages: (id) => paperStorage.listMessages(id),
 	highlights: {
 		all: () => [...get(chatHighlights).values()].flat(),
 		update: updateChatHighlight

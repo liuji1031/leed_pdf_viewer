@@ -1,21 +1,21 @@
 import { derived, get } from 'svelte/store';
 import { activePDFKey, pdfState } from '$lib/stores/drawingStore';
 import { chatSettings } from '$lib/stores/chatSettingsStore';
-import { chatStorage } from '$lib/utils/chatStorage';
+import { paperStorage } from './paperStorage';
 import { MinerUClient, ParseError, pickTier } from './docParser/mineruClient';
 import { structuredContentToDocument } from './docParser/mineruContent';
 import { createParseQueue, type ParseRequest } from './parseQueue';
 
 /**
  * The app's parse queue, backed by MinerU through the /api/mineru relay and
- * cached in IndexedDB. Documents are parsed in the background as soon as they
+ * cached in the paper database (or IndexedDB without one). Documents are parsed in the background as soon as they
  * are opened (unless auto-parse is off), so the paper is usually ready by the
  * time the user asks a question.
  */
 export const parseQueue = createParseQueue({
 	cache: {
-		get: (pdfKey) => chatStorage.getDocument(pdfKey),
-		put: (doc) => chatStorage.putDocument(doc)
+		get: (pdfKey) => paperStorage.getDocument(pdfKey),
+		put: (doc) => paperStorage.putDocument(doc)
 	},
 	async parse(req, { signal, onStage }) {
 		const settings = get(chatSettings);

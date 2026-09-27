@@ -20,6 +20,14 @@ x-openrouter-env: &openrouter-env
   OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
   OPENROUTER_SUMMARY_MODEL: ${OPENROUTER_SUMMARY_MODEL:-}
 
+# Paper database (SQLite): each paper's parse, chats and annotations, shared by
+# every browser using this server. A host directory rather than a named volume,
+# so `docker volume prune` can't delete it. It must exist and be writable by
+# uid 1000 before the first start, or Docker creates it owned by root.
+x-paper-db-env: &paper-db-env
+  PAPER_DB_PATH: /data/leedpdf.db
+x-paper-db-mount: &paper-db-mount ${PAPER_DATA_DIR:-./data}:/data
+
 # Source bind-mount plus an anonymous volume that shadows node_modules, so the
 # image's installed dependencies survive the mount instead of being hidden by
 # the (absent) host node_modules. Containers run as uid 1000 (see Dockerfile),
@@ -40,7 +48,7 @@ services:
       context: .
       target: dev
     environment:
-      <<: [*public-env, *openrouter-env]
+      <<: [*public-env, *openrouter-env, *paper-db-env]
       # Host-side address the browser connects back to for HMR. Must be the
       # host's value, not the container's, or the websocket never connects.
       VITE_HMR_HOST: ${VITE_HMR_HOST:-localhost}
@@ -50,7 +58,10 @@ services:
       # can't call MinerU directly — it sends no CORS headers).
       MINERU_URL: ${MINERU_URL:-http://mineru:8000}
       MINERU_API_KEY: ${MINERU_API_KEY:-}
-    volumes: *source-mount
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - *paper-db-mount
     ports:
       - "${DEV_PORT:-5173}:5173"
     depends_on:
@@ -86,11 +97,13 @@ services:
     environment:
       MINERU_URL: ${MINERU_URL:-http://mineru:8000}
       MINERU_API_KEY: ${MINERU_API_KEY:-}
-      <<: *openrouter-env
+      <<: [*openrouter-env, *paper-db-env]
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
       # adapter-node needs the public origin for form actions / CSRF checks.
       ORIGIN: ${ORIGIN:-http://localhost:3000}
       BODY_SIZE_LIMIT: ${BODY_SIZE_LIMIT:-110M}
+    volumes:
+      - *paper-db-mount
     ports:
       - "${APP_PORT:-3000}:3000"
     depends_on:

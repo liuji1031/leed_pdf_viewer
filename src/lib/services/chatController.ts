@@ -7,7 +7,7 @@ import {
 	clearPendingSelection,
 	type PendingSelection
 } from '$lib/stores/chatStore';
-import type { ChatMessage, ChatSession, ChatStorageManager } from '$lib/utils/chatStorage';
+import type { ChatMessage, ChatSession, ChatStorage } from '$lib/utils/chatStorage';
 import { buildMessages, buildSessionContext } from './chatContext';
 import type { ParsedDocument } from './docParser/types';
 import { OpenRouterError, type StreamEvent, type StreamRequest } from './openRouter';
@@ -33,7 +33,7 @@ export class ChatError extends Error {
 }
 
 export interface ChatControllerDeps {
-	storage: Pick<ChatStorageManager, 'putSession' | 'putMessage' | 'getSession' | 'deleteSession' | 'deleteByPdfKey'>;
+	storage: Pick<ChatStorage, 'putSession' | 'putMessage' | 'getSession' | 'deleteSession' | 'deleteByPdfKey'>;
 	stream: (req: StreamRequest) => AsyncGenerator<StreamEvent>;
 	/** The open document's key and parsed content (null until parsed). */
 	getDocument: () => { pdfKey: string; parsed: ParsedDocument | null } | null;

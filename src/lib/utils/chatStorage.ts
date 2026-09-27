@@ -109,6 +109,21 @@ export interface ChatMessage {
 	usage?: { promptTokens: number; completionTokens: number };
 }
 
+/** What the chat and parse caches need from storage, local or on the server. */
+export interface ChatStorage {
+	isAvailable(): Promise<boolean>;
+	listSessions(pdfKey: string): Promise<ChatSession[]>;
+	getSession(id: string): Promise<ChatSession | null>;
+	putSession(session: ChatSession): Promise<void>;
+	deleteSession(id: string): Promise<void>;
+	listMessages(sessionId: string): Promise<ChatMessage[]>;
+	putMessage(message: ChatMessage): Promise<void>;
+	deleteByPdfKey(pdfKey: string): Promise<void>;
+	getDocument(pdfKey: string): Promise<ParsedDocument | null>;
+	putDocument(doc: ParsedDocument): Promise<void>;
+	deleteDocument(pdfKey: string): Promise<void>;
+}
+
 export class ChatStorageError extends Error {
 	constructor(message: string, options?: { cause?: unknown }) {
 		super(message, options);
@@ -143,7 +158,7 @@ function transactionDone(tx: IDBTransaction): Promise<void> {
 	});
 }
 
-export class ChatStorageManager {
+export class ChatStorageManager implements ChatStorage {
 	private db: Promise<IDBDatabase> | null = null;
 
 	/** Pass `null` for an environment without IndexedDB. */
@@ -320,6 +335,18 @@ export class ChatStorageManager {
 		const tx = db.transaction('documents', 'readwrite');
 		tx.objectStore('documents').delete(pdfKey);
 		await transactionDone(tx);
+	}
+
+	/** Everything stored, for copying into another backend. */
+	async exportAll(): Promise<{ sessions: ChatSession[]; messages: ChatMessage[]; documents: ParsedDocument[] }> {
+		const db = await this.open();
+		const tx = db.transaction(['sessions', 'messages', 'documents']);
+		const [sessions, messages, documents] = await Promise.all([
+			request<ChatSession[]>(tx.objectStore('sessions').getAll()),
+			request<ChatMessage[]>(tx.objectStore('messages').getAll()),
+			request<ParsedDocument[]>(tx.objectStore('documents').getAll())
+		]);
+		return { sessions, messages, documents };
 	}
 
 	/** Test/maintenance helper: close the connection. */

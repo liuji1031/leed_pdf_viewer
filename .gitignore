@@ -67,3 +67,7 @@ test-results/
 !docs/SEARCH_FEATURE.md
 !docs/chat-interface-plan.md
 !todo.md
+
+# paper database (PAPER_DATA_DIR); the directory is kept so docker never creates it as root
+/data/*
+!/data/.gitkeep

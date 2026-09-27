@@ -2,6 +2,7 @@ import { derived, writable } from 'svelte/store';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { DEFAULT_TEXT_FONT, BUNDLED_FONTS, getAllAvailableFonts, type FontOption } from '../config/fonts';
 import type { NormRect, TextAnchor } from '../utils/textAnchor';
+import { paperApi } from '../services/paperApi';
 
 export type DrawingTool =
 	| 'pencil'
@@ -423,19 +424,15 @@ function setupAnnotationAutoSave<T>(
 ): void {
 	if (typeof window === 'undefined') return;
 
+	const kind = kindOf(storageKey);
 	store.subscribe((items) => {
 		if (!currentPDFKey) return;
 
 		try {
-			const itemsObject: Record<string, T[]> = {};
-			items.forEach((itemList, pageNum) => {
-				if (itemList.length > 0) {
-					itemsObject[pageNum.toString()] = itemList;
-				}
-			});
-
+			const itemsObject = mapToObject(items);
 			localStorage.setItem(`${storageKey}_${currentPDFKey}`, JSON.stringify(itemsObject));
 			console.log(`Auto-saved ${annotationType} for PDF ${currentPDFKey}`);
+			queueServerSave(kind, itemsObject);
 		} catch (error) {
 			console.error(`Error saving ${annotationType} to localStorage:`, error);
 		}
@@ -492,6 +489,178 @@ function mapToObject<T>(map: Map<number, T[]>): Record<string, T[]> {
 	return obj;
 }
 
+function objectToMap<T>(pages: Record<string, T[]>): Map<number, T[]> {
+	const map = new Map<number, T[]>();
+	for (const [pageNum, items] of Object.entries(pages)) map.set(parseInt(pageNum, 10), items);
+	return map;
+}
+
+// =============================================================================
+// SERVER SYNC
+// =============================================================================
+
+/**
+ * With a paper database on the server (see paperApi), annotations follow the
+ * paper into any browser. localStorage stays the working copy, since export
+ * and other code read it synchronously; each kind is mirrored to the server a
+ * moment after it changes. On open, the server's copy replaces the local one,
+ * except for kinds with local edits the server hasn't confirmed (made while
+ * it was unreachable, or just before the tab closed), which are sent instead.
+ */
+type AnnotationPageMap = import('svelte/store').Writable<Map<number, unknown[]>>;
+const ANNOTATION_KINDS: { kind: string; storageKey: string; store: AnnotationPageMap }[] = [
+	{ kind: 'drawings', storageKey: STORAGE_KEY, store: drawingPaths as AnnotationPageMap },
+	{ kind: 'textAnnotations', storageKey: STORAGE_KEY_TEXT, store: textAnnotations as AnnotationPageMap },
+	{ kind: 'stickyNotes', storageKey: STORAGE_KEY_STICKY_NOTES, store: stickyNoteAnnotations as AnnotationPageMap },
+	{ kind: 'stamps', storageKey: STORAGE_KEY_STAMP_ANNOTATIONS, store: stampAnnotations as AnnotationPageMap },
+	{ kind: 'arrows', storageKey: STORAGE_KEY_ARROW_ANNOTATIONS, store: arrowAnnotations as AnnotationPageMap },
+	{ kind: 'images', storageKey: STORAGE_KEY_IMAGE_ANNOTATIONS, store: imageAnnotations as AnnotationPageMap },
+	{ kind: 'chatHighlights', storageKey: STORAGE_KEY_CHAT_HIGHLIGHTS, store: chatHighlights as AnnotationPageMap }
+];
+
+const UNSYNCED_KEY = 'leedpdf_unsynced_annotations';
+const SERVER_SAVE_DELAY_MS = 600;
+
+// > 0 while stores are filled from storage rather than edited by the user.
+let loadingDepth = 0;
+const pendingServerSaves = new Map<string, { pdfKey: string; kind: string; data: Record<string, unknown[]> }>();
+let serverSaveTimer: ReturnType<typeof setTimeout> | undefined;
+
+function kindOf(storageKey: string): string {
+	return ANNOTATION_KINDS.find((k) => k.storageKey === storageKey)?.kind ?? storageKey;
+}
+
+function whileLoading(fn: () => void) {
+	loadingDepth++;
+	try {
+		fn();
+	} finally {
+		loadingDepth--;
+	}
+}
+
+const syncId = (pdfKey: string, kind: string) => `${kind}\n${pdfKey}`;
+
+function unsyncedIds(): Set<string> {
+	try {
+		const raw = localStorage.getItem(UNSYNCED_KEY);
+		const ids = raw ? JSON.parse(raw) : [];
+		return new Set(Array.isArray(ids) ? ids : []);
+	} catch {
+		return new Set();
+	}
+}
+
+function markUnsynced(id: string, unsynced: boolean) {
+	const ids = unsyncedIds();
+	if (unsynced === ids.has(id)) return;
+	if (unsynced) ids.add(id);
+	else ids.delete(id);
+	try {
+		localStorage.setItem(UNSYNCED_KEY, JSON.stringify([...ids]));
+	} catch {
+		// best effort: at worst the server's copy wins on the next open.
+	}
+}
+
+function readStoredPages(storageKey: string, pdfKey: string): Record<string, unknown[]> | null {
+	try {
+		const raw = localStorage.getItem(`${storageKey}_${pdfKey}`);
+		const pages = raw ? JSON.parse(raw) : null;
+		return pages && typeof pages === 'object' && !Array.isArray(pages) ? pages : null;
+	} catch {
+		return null;
+	}
+}
+
+function scheduleServerSaves() {
+	clearTimeout(serverSaveTimer);
+	serverSaveTimer = setTimeout(() => void flushServerSaves(), SERVER_SAVE_DELAY_MS);
+}
+
+function queueServerSave(kind: string, data: Record<string, unknown[]>) {
+	if (loadingDepth > 0 || !currentPDFKey || typeof window === 'undefined') return;
+	if (paperApi.knownEnabled === false) return; // no paper database: localStorage is all there is
+	const id = syncId(currentPDFKey, kind);
+	if (paperApi.knownEnabled) markUnsynced(id, true);
+	pendingServerSaves.set(id, { pdfKey: currentPDFKey, kind, data });
+	scheduleServerSaves();
+}
+
+/** Send pending annotation changes to the server now. */
+export async function flushServerSaves(options: { keepalive?: boolean } = {}): Promise<void> {
+	clearTimeout(serverSaveTimer);
+	const batch = [...pendingServerSaves.entries()];
+	pendingServerSaves.clear();
+	if (batch.length === 0) return;
+	if (!(await paperApi.enabled())) {
+		for (const [id] of batch) markUnsynced(id, false);
+		return;
+	}
+	await Promise.all(
+		batch.map(async ([id, save]) => {
+			try {
+				await paperApi.putAnnotations(save.pdfKey, save.kind, save.data, options);
+				// a newer edit queued meanwhile keeps it unsynced until that one lands.
+				if (!pendingServerSaves.has(id)) markUnsynced(id, false);
+			} catch (error) {
+				// stays marked unsynced, so the next open sends it again.
+				console.warn(`Could not save ${save.kind} for ${save.pdfKey} to the paper database:`, error);
+			}
+		})
+	);
+}
+
+/** Replace this paper's annotations with the server's copy, or send ours where the server has none. */
+async function syncAnnotationsFromServer(pdfKey: string): Promise<void> {
+	if (!(await paperApi.enabled())) return;
+	let remote: Record<string, Record<string, unknown[]>>;
+	try {
+		remote = await paperApi.getAnnotations(pdfKey);
+	} catch (error) {
+		console.warn(`Could not load annotations for ${pdfKey} from the paper database:`, error);
+		return;
+	}
+	if (pdfKey !== currentPDFKey) return; // switched papers meanwhile
+
+	const unsynced = unsyncedIds();
+	for (const { kind, storageKey, store } of ANNOTATION_KINDS) {
+		const id = syncId(pdfKey, kind);
+		if (pendingServerSaves.has(id)) continue; // edited since opening: ours goes up shortly
+		const local = readStoredPages(storageKey, pdfKey);
+		const serverPages = remote[kind];
+		if (unsynced.has(id) || (!serverPages && local && Object.keys(local).length > 0)) {
+			pendingServerSaves.set(id, { pdfKey, kind, data: local ?? {} });
+			continue;
+		}
+		if (!serverPages) continue;
+		try {
+			localStorage.setItem(`${storageKey}_${pdfKey}`, JSON.stringify(serverPages));
+		} catch (error) {
+			console.warn(`Could not cache server ${kind} for ${pdfKey} locally:`, error);
+		}
+		whileLoading(() => store.set(objectToMap(serverPages)));
+	}
+	if (pendingServerSaves.size > 0) scheduleServerSaves();
+}
+
+/** Every annotation set kept in this browser's localStorage, for copying to the server. */
+export function collectStoredAnnotations(): { pdfKey: string; kind: string; data: Record<string, unknown[]> }[] {
+	const out: { pdfKey: string; kind: string; data: Record<string, unknown[]> }[] = [];
+	if (typeof localStorage === 'undefined') return out;
+	// longest prefix first, so no kind's key is mistaken for another's.
+	const kinds = [...ANNOTATION_KINDS].sort((a, b) => b.storageKey.length - a.storageKey.length);
+	for (let i = 0; i < localStorage.length; i++) {
+		const key = localStorage.key(i);
+		const match = key ? kinds.find((k) => key.startsWith(`${k.storageKey}_`)) : undefined;
+		if (!key || !match) continue;
+		const pdfKey = key.slice(match.storageKey.length + 1);
+		const data = readStoredPages(match.storageKey, pdfKey);
+		if (pdfKey && data && Object.keys(data).length > 0) out.push({ pdfKey, kind: match.kind, data });
+	}
+	return out;
+}
+
 // Generate a unique key for PDF based on name and size
 export const generatePDFKey = (fileName: string, fileSize: number): string => {
 	return `${fileName}_${fileSize}`;
@@ -513,17 +682,24 @@ export const setCurrentPDF = (fileName: string, fileSize: number) => {
 	}
 
 	// Load drawings, shapes, text annotations, sticky notes, stamps, and images for this specific PDF
-	loadDrawingsForCurrentPDF();
-	loadTextAnnotationsForCurrentPDF();
-	loadStickyNotesForCurrentPDF();
-	loadStampAnnotationsForCurrentPDF();
-	loadArrowAnnotationsForCurrentPDF();
-	loadImageAnnotationsForCurrentPDF();
-	loadChatHighlightsForCurrentPDF();
+	loadAllForCurrentPDF();
 
 	// Clear any text annotation selection from the previous PDF
 	selectedTextAnnotationId.set(null);
 };
+
+function loadAllForCurrentPDF() {
+	whileLoading(() => {
+		loadDrawingsForCurrentPDF();
+		loadTextAnnotationsForCurrentPDF();
+		loadStickyNotesForCurrentPDF();
+		loadStampAnnotationsForCurrentPDF();
+		loadArrowAnnotationsForCurrentPDF();
+		loadImageAnnotationsForCurrentPDF();
+		loadChatHighlightsForCurrentPDF();
+	});
+	if (currentPDFKey && typeof window !== 'undefined') void syncAnnotationsFromServer(currentPDFKey);
+}
 
 // Create loaders using the generic factory (DRY refactoring)
 const loadDrawingsForCurrentPDF = createAnnotationLoader<DrawingPath>(
@@ -556,27 +732,29 @@ if (typeof window !== 'undefined') {
 			const { pdfKey } = JSON.parse(savedPDFInfo);
 			currentPDFKey = pdfKey;
 			activePDFKeyStore.set(pdfKey);
-			loadDrawingsForCurrentPDF();
-			loadTextAnnotationsForCurrentPDF();
-			loadStickyNotesForCurrentPDF();
-			loadStampAnnotationsForCurrentPDF();
-			loadArrowAnnotationsForCurrentPDF();
-			loadImageAnnotationsForCurrentPDF();
-			loadChatHighlightsForCurrentPDF();
+			loadAllForCurrentPDF();
 		}
 	} catch (error) {
 		console.error('Error loading PDF info from localStorage:', error);
 	}
 }
 
-// Set up auto-save subscriptions using the generic factory (DRY refactoring)
-setupAnnotationAutoSave<DrawingPath>(STORAGE_KEY, drawingPaths, 'drawings');
-setupAnnotationAutoSave<TextAnnotation>(STORAGE_KEY_TEXT, textAnnotations, 'text annotations');
-setupAnnotationAutoSave<StickyNoteAnnotation>(STORAGE_KEY_STICKY_NOTES, stickyNoteAnnotations, 'sticky notes');
-setupAnnotationAutoSave<StampAnnotation>(STORAGE_KEY_STAMP_ANNOTATIONS, stampAnnotations, 'stamp annotations');
-setupAnnotationAutoSave<ArrowAnnotation>(STORAGE_KEY_ARROW_ANNOTATIONS, arrowAnnotations, 'arrow annotations');
-setupAnnotationAutoSave<ImageAnnotation>(STORAGE_KEY_IMAGE_ANNOTATIONS, imageAnnotations, 'image annotations');
-setupAnnotationAutoSave<ChatHighlight>(STORAGE_KEY_CHAT_HIGHLIGHTS, chatHighlights, 'chat highlights');
+// Set up auto-save subscriptions using the generic factory (DRY refactoring).
+// Subscribing replays the current value, which is not an edit.
+whileLoading(() => {
+	setupAnnotationAutoSave<DrawingPath>(STORAGE_KEY, drawingPaths, 'drawings');
+	setupAnnotationAutoSave<TextAnnotation>(STORAGE_KEY_TEXT, textAnnotations, 'text annotations');
+	setupAnnotationAutoSave<StickyNoteAnnotation>(STORAGE_KEY_STICKY_NOTES, stickyNoteAnnotations, 'sticky notes');
+	setupAnnotationAutoSave<StampAnnotation>(STORAGE_KEY_STAMP_ANNOTATIONS, stampAnnotations, 'stamp annotations');
+	setupAnnotationAutoSave<ArrowAnnotation>(STORAGE_KEY_ARROW_ANNOTATIONS, arrowAnnotations, 'arrow annotations');
+	setupAnnotationAutoSave<ImageAnnotation>(STORAGE_KEY_IMAGE_ANNOTATIONS, imageAnnotations, 'image annotations');
+	setupAnnotationAutoSave<ChatHighlight>(STORAGE_KEY_CHAT_HIGHLIGHTS, chatHighlights, 'chat highlights');
+});
+
+if (typeof window !== 'undefined') {
+	// the tab may close within the save delay; keepalive lets small saves finish.
+	window.addEventListener('pagehide', () => void flushServerSaves({ keepalive: true }));
+}
 
 // Undo/redo functionality
 export const undoStack = writable<Array<{ pageNumber: number; paths: DrawingPath[] }>>([]);
@@ -985,6 +1163,7 @@ export const forceSaveAllAnnotations = (): void => {
 		forceSaveStore(chatHighlights, STORAGE_KEY_CHAT_HIGHLIGHTS);
 
 		console.log(`Force saved all annotations for PDF ${currentPDFKey}`);
+		void flushServerSaves();
 	} catch (error) {
 		console.error('Error force saving annotations to localStorage:', error);
 	}
