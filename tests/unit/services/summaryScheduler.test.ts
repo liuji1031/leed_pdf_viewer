@@ -35,7 +35,13 @@ const exchange = (sessionId: string): ChatMessage[] => [
 ];
 
 function harness(
-	opts: { settings?: Partial<ChatSettings>; fail?: boolean; hang?: boolean; mustReason?: boolean } = {}
+	opts: {
+		settings?: Partial<ChatSettings>;
+		fail?: boolean;
+		hang?: boolean;
+		rejectsEffort?: boolean;
+		silentWhenMinimal?: boolean;
+	} = {}
 ) {
 	const sessions = new Map<string, ChatSession>();
 	const messages = new Map<string, ChatMessage[]>();
@@ -51,8 +57,12 @@ function harness(
 			);
 		}
 		if (opts.fail) throw new OpenRouterError('server', 'boom');
-		if (opts.mustReason && req.disableReasoning) {
-			throw new OpenRouterError('bad_request', 'Reasoning is mandatory for this endpoint and cannot be disabled.', 400);
+		if (opts.rejectsEffort && req.reasoning === 'minimal') {
+			throw new OpenRouterError('bad_request', 'reasoning.effort "minimal" is not supported by this model.', 400);
+		}
+		if (opts.silentWhenMinimal && req.reasoning === 'minimal') {
+			yield { type: 'done' };
+			return;
 		}
 		yield { type: 'delta', text: '"Asked why logits are scaled; ' };
 		yield { type: 'delta', text: 'answer: to keep softmax gradients healthy."' };
@@ -159,7 +169,7 @@ describe('summary scheduling', () => {
 		h.scheduler.onNewSelection();
 		await h.scheduler.idle();
 		const req = h.calls[0];
-		expect(req).toMatchObject({ purpose: 'summary', maxTokens: 120, temperature: 0.2, disableReasoning: true });
+		expect(req).toMatchObject({ purpose: 'summary', maxTokens: 200, temperature: 0.2, reasoning: 'minimal' });
 		expect(req).not.toHaveProperty('model');
 		expect(req.messages[0]).toEqual({ role: 'system', content: SUMMARY_PROMPT });
 		expect(req.messages[1].content).toContain('Passage: "passage a"');
@@ -218,17 +228,30 @@ describe('summary skips and failures', () => {
 		expect(h.calls).toHaveLength(2);
 	});
 
-	it('asks a model that must reason again, with room to reason', async () => {
-		const h = harness({ mustReason: true });
+	it.each<[string, { rejectsEffort?: boolean; silentWhenMinimal?: boolean }]>([
+		['rejects minimal reasoning', { rejectsEffort: true }],
+		['returns nothing at minimal reasoning', { silentWhenMinimal: true }]
+	])('asks again with reasoning off when the model %s', async (_, opts) => {
+		const h = harness(opts);
 		h.add(session('a'));
 		await h.scheduler.onAnswerComplete('a');
 		h.scheduler.onNewSelection();
 		await h.scheduler.idle();
-		expect(h.calls.map((c) => [c.disableReasoning, c.maxTokens])).toEqual([
-			[true, 120],
-			[undefined, 2_000]
+		expect(h.calls.map((c) => [c.reasoning, c.maxTokens])).toEqual([
+			['minimal', 200],
+			['off', 120]
 		]);
 		expect(h.state('a')).toBe('ready');
+		expect(h.sessions.get('a')?.summaryAttempts).toBe(0);
+	});
+
+	it('makes one request when minimal reasoning works', async () => {
+		const h = harness();
+		h.add(session('a'));
+		await h.scheduler.onAnswerComplete('a');
+		h.scheduler.onNewSelection();
+		await h.scheduler.idle();
+		expect(h.calls).toHaveLength(1);
 	});
 
 	it('leaves an interrupted summary armed when the document is left', async () => {

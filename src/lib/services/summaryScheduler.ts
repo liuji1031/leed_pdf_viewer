@@ -23,10 +23,12 @@ import { OpenRouterError, type StreamEvent, type StreamRequest } from './openRou
  * answers are capped at ~25 words, at most two attempts, and when a document
  * is reopened only the three most recent overdue summaries are caught up.
  *
- * Reasoning is turned off: reasoning tokens count against the 120-token cap,
- * and a reasoning model (Kimi K2.6, measured) spends all of it thinking and
- * returns nothing. A model that can't turn reasoning off rejects the request;
- * it is then asked again with reasoning and room for it.
+ * Reasoning is kept to minimal effort: reasoning tokens count against the
+ * token cap, and at the default effort a reasoning model (Kimi K2.6, GLM 5.3,
+ * measured) spends all of it thinking and returns nothing. Many newer models
+ * can't turn reasoning off, but minimal effort costs them ~10–25 tokens. A
+ * model that rejects the effort setting, or still returns nothing, is asked
+ * again with reasoning off.
  */
 
 export const SUMMARY_PROMPT =
@@ -36,7 +38,8 @@ export const SUMMARY_PROMPT =
 const MAX_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 30_000;
 const SUMMARY_MAX_TOKENS = 120;
-const REASONING_MAX_TOKENS = 2_000;
+/** Room for minimal reasoning on top of the summary itself. */
+const MINIMAL_REASONING_MAX_TOKENS = 200;
 const CATCH_UP_LIMIT = 3;
 const MIN_MESSAGES = 2;
 const TRANSCRIPT_MESSAGES = 8;
@@ -69,10 +72,12 @@ export interface SummaryScheduler {
 	idle(): Promise<void>;
 }
 
-/** The model refused to turn reasoning off. */
-function mustReason(error: unknown): boolean {
-	return error instanceof OpenRouterError && error.kind === 'bad_request' && /reason/i.test(error.message);
+/** The model refused the reasoning setting. */
+function rejectsReasoning(error: unknown): boolean {
+	return error instanceof OpenRouterError && error.kind === 'bad_request' && /reason|effort/i.test(error.message);
 }
+
+const clean = (text: string) => text.trim().replace(/^["“]|["”]$/g, '');
 
 export function buildSummaryMessages(session: ChatSession, messages: ChatMessage[]) {
 	const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -167,12 +172,13 @@ export function createSummaryScheduler(deps: SummarySchedulerDeps): SummarySched
 			let summary = '';
 			try {
 				try {
-					summary = await collect({ ...base, maxTokens: SUMMARY_MAX_TOKENS, disableReasoning: true });
+					summary = clean(await collect({ ...base, maxTokens: MINIMAL_REASONING_MAX_TOKENS, reasoning: 'minimal' }));
 				} catch (error) {
-					if (!mustReason(error)) throw error;
-					summary = await collect({ ...base, maxTokens: REASONING_MAX_TOKENS });
+					if (!rejectsReasoning(error)) throw error;
 				}
-				summary = summary.trim().replace(/^["“]|["”]$/g, '');
+				if (!summary) {
+					summary = clean(await collect({ ...base, maxTokens: SUMMARY_MAX_TOKENS, reasoning: 'off' }));
+				}
 				if (!summary) throw new Error('Empty summary');
 
 				const latest = (await deps.getSession(sessionId)) ?? session;

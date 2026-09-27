@@ -113,11 +113,14 @@ describe('streamChat', () => {
 		});
 	});
 
-	it("turns the model's reasoning off when asked", async () => {
+	it.each([
+		['minimal', { effort: 'minimal' }],
+		['off', { enabled: false }]
+	] as const)('sends reasoning %s as OpenRouter expects', async (reasoning, expected) => {
 		const fetchImpl = vi.fn(async () => sseResponse([DONE]).response);
-		await collect(streamChat(request(fetchImpl, { disableReasoning: true })));
+		await collect(streamChat(request(fetchImpl, { reasoning })));
 		const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
-		expect(JSON.parse(init.body as string).reasoning).toEqual({ enabled: false });
+		expect(JSON.parse(init.body as string).reasoning).toEqual(expected);
 	});
 
 	it('posts summaries to the summary route and honours another endpoint', async () => {

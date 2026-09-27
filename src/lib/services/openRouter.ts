@@ -63,11 +63,13 @@ export interface StreamRequest {
 	maxTokens?: number;
 	temperature?: number;
 	/**
-	 * Ask the model not to reason first. Reasoning tokens count against
-	 * `maxTokens`, so a reasoning model given a small budget can spend all of
-	 * it thinking and return no text. Models that must reason reject this.
+	 * How much the model may reason before answering. Reasoning tokens count
+	 * against `maxTokens`, so a reasoning model given a small budget can spend
+	 * all of it thinking and return no text. `minimal` keeps it to a few dozen
+	 * tokens; `off` skips it, which models that must reason reject.
+	 * Unset leaves the model's default.
 	 */
-	disableReasoning?: boolean;
+	reasoning?: 'minimal' | 'off';
 	/** Injectable for tests. */
 	fetchImpl?: typeof fetch;
 }
@@ -146,7 +148,8 @@ export async function* streamChat(req: StreamRequest): AsyncGenerator<StreamEven
 				usage: { include: true },
 				...(req.maxTokens !== undefined && { max_tokens: req.maxTokens }),
 				...(req.temperature !== undefined && { temperature: req.temperature }),
-				...(req.disableReasoning && { reasoning: { enabled: false } })
+				...(req.reasoning === 'minimal' && { reasoning: { effort: 'minimal' } }),
+				...(req.reasoning === 'off' && { reasoning: { enabled: false } })
 			}),
 			signal: req.signal
 		});
