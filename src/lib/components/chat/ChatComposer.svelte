@@ -8,6 +8,7 @@
 	export let busy = false;
 	export let wholePaper = false;
 	export let attachPage = false;
+	export let webSearch = false;
 	/** Rough size of what will be sent, e.g. "≈4.8k tokens". */
 	export let contextNote = '';
 	export let onSend: (text: string) => void;
@@ -91,6 +92,10 @@
 			<label class="flex items-center gap-1.5" title="Send an image of the page — for equations and figures">
 				<input type="checkbox" bind:checked={attachPage} class="rounded text-sage focus:ring-sage" data-testid="chat-attach-page" />
 				Page image
+			</label>
+			<label class="flex items-center gap-1.5" title="Let the model search the web, for things the paper doesn't cover — about 1–5¢ extra per question">
+				<input type="checkbox" bind:checked={webSearch} class="rounded text-sage focus:ring-sage" data-testid="chat-web-search" />
+				Web search
 			</label>
 		</span>
 		{#if blockedReason}

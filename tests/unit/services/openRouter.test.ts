@@ -123,6 +123,59 @@ describe('streamChat', () => {
 		expect(JSON.parse(init.body as string).reasoning).toEqual(expected);
 	});
 
+	it('offers the capped web search tool only when asked', async () => {
+		const fetchImpl = vi.fn(async () => sseResponse([DONE]).response);
+		await collect(streamChat(request(fetchImpl, { webSearch: true })));
+		await collect(streamChat(request(fetchImpl)));
+		const bodies = fetchImpl.mock.calls.map((c) => JSON.parse((c as unknown as [string, RequestInit])[1].body as string));
+		expect(bodies[0].tools).toEqual([
+			{ type: 'openrouter:web_search', parameters: { max_results: 3, max_total_results: 6 } }
+		]);
+		expect(bodies[0].max_tool_calls).toBe(2);
+		expect(bodies[1]).not.toHaveProperty('tools');
+		expect(bodies[1]).not.toHaveProperty('max_tool_calls');
+	});
+
+	it('collects the pages a web search returned, once each', async () => {
+		const cite = (url: string, title: string) => ({ type: 'url_citation', url_citation: { url, title, content: '…' } });
+		const chunk = (delta: object) => `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`;
+		const events = await collect(
+			streamChat(
+				request(async () =>
+					sseResponse([
+						chunk({ annotations: [cite('https://a.org', 'A'), cite('https://b.org', '')] }),
+						chunk({ content: 'answer', annotations: [cite('https://a.org', 'A again')] }),
+						DONE
+					]).response
+				)
+			)
+		);
+		expect(events.at(-1)).toMatchObject({
+			type: 'done',
+			sources: [
+				{ url: 'https://a.org', title: 'A' },
+				{ url: 'https://b.org', title: 'https://b.org' }
+			]
+		});
+	});
+
+	it('drops text the model wrote before a web search, and only then', async () => {
+		const chunk = (delta: object) => `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`;
+		const body = [
+			chunk({ reasoning: 'plan' }),
+			chunk({ content: 'Let me search.' }),
+			chunk({ reasoning: 'read results' }),
+			chunk({ content: 'Answer.' }),
+			DONE
+		];
+		const types = async (webSearch: boolean) =>
+			(await collect(streamChat(request(async () => sseResponse(body).response, { webSearch })))).map((e) =>
+				e.type === 'delta' ? e.text : e.type
+			);
+		expect(await types(true)).toEqual(['Let me search.', 'restart', 'Answer.', 'done']);
+		expect(await types(false)).toEqual(['Let me search.', 'Answer.', 'done']);
+	});
+
 	it('posts summaries to the summary route and honours another endpoint', async () => {
 		const fetchImpl = vi.fn(async () => sseResponse([DONE]).response);
 		await collect(streamChat(request(fetchImpl, { purpose: 'summary', endpoint: 'https://x.test/v1/' })));

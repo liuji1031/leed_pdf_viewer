@@ -59,6 +59,8 @@ export interface SendOptions {
 	pageImage?: string;
 	/** Another passage to bring into the conversation with this question. */
 	passage?: PendingSelection;
+	/** Let the model search the web for this answer. */
+	webSearch?: boolean;
 }
 
 export interface ChatController {
@@ -268,6 +270,7 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 			question,
 			passage: passage && { snapshot: passage.contextSnapshot, quotedText: passage.quotedText },
 			wholePaper: options.wholePaper,
+			webSearch: options.webSearch,
 			pageImage: options.pageImage
 		});
 
@@ -276,7 +279,8 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 		let answeredBy: string | undefined;
 		try {
 			// No model: the relay uses the server's OPENROUTER_MODEL.
-			for await (const event of deps.stream({ messages, signal: controller.signal })) {
+			const request: StreamRequest = { messages, signal: controller.signal, ...(options.webSearch && { webSearch: true }) };
+			for await (const event of deps.stream(request)) {
 				if (event.type === 'delta') {
 					current = { ...current, content: current.content + event.text };
 					setMessage(current);
@@ -285,9 +289,17 @@ export function createChatController(deps: ChatControllerDeps): ChatController {
 						lastPersist = now();
 						await deps.storage.putMessage(current);
 					}
+				} else if (event.type === 'restart') {
+					current = { ...current, content: '' };
+					setMessage(current);
 				} else if (event.type === 'done') {
 					answeredBy = event.model;
-					current = { ...current, status: 'complete', ...(event.usage && { usage: event.usage }) };
+					current = {
+						...current,
+						status: 'complete',
+						...(event.usage && { usage: event.usage }),
+						...(event.sources && { sources: event.sources })
+					};
 				}
 			}
 		} catch (error) {

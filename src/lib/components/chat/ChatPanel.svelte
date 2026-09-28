@@ -60,6 +60,7 @@
 	let sendError: string | null = null;
 	let wholePaper = false;
 	let attachPage = false;
+	let webSearch = false;
 
 	$: activeSession = $chatSessions.find((s) => s.id === $activeSessionId) ?? null;
 	$: messages = activeSession ? ($chatMessages.get(activeSession.id) ?? []) : [];
@@ -125,7 +126,7 @@
 	}
 
 	// ---- Size of what will be sent -------------------------------------------
-	$: contextNote = estimate(parsed, pendingAsk, pendingAdd, activeSession, messages, wholePaper);
+	$: contextNote = estimate(parsed, pendingAsk, pendingAdd, activeSession, messages, wholePaper, webSearch);
 
 	function estimate(
 		doc: typeof parsed,
@@ -133,7 +134,8 @@
 		add: typeof pendingAdd,
 		session: typeof activeSession,
 		msgs: typeof messages,
-		whole: boolean
+		whole: boolean,
+		web: boolean
 	): string {
 		if (!doc || (!ask && !session)) return '';
 		try {
@@ -152,11 +154,12 @@
 				passage: add
 					? { snapshot: buildSessionContext(doc, add, BUDGET.addedWindow).snapshot, quotedText: add.anchor.text }
 					: undefined,
-				wholePaper: whole
+				wholePaper: whole,
+				webSearch: web
 			});
 			const chars = built.reduce((n, m) => n + (typeof m.content === 'string' ? m.content.length : 0), 0);
 			const tokens = Math.ceil(chars / 4);
-			return `≈${tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : tokens} tokens sent`;
+			return `≈${tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : tokens} tokens sent${web ? ' + web results' : ''}`;
 		} catch {
 			return '';
 		}
@@ -170,7 +173,7 @@
 			askRequest.set(null);
 			try {
 				const pageImage = await pageImageFor(request.pageNumber);
-				await chat.startConversation(request, text, { wholePaper, pageImage });
+				await chat.startConversation(request, text, { wholePaper, webSearch, pageImage });
 			} catch (error) {
 				askRequest.set(request); // keep the quote so nothing is lost
 				sendError = error instanceof ChatError ? error.message : String(error);
@@ -180,7 +183,12 @@
 			if (passage) askRequest.set(null);
 			try {
 				const pageImage = await pageImageFor(passage?.pageNumber ?? activeSession.pageNumber);
-				await chat.sendMessage(activeSession.id, text, { wholePaper, pageImage, passage: passage ?? undefined });
+				await chat.sendMessage(activeSession.id, text, {
+					wholePaper,
+					webSearch,
+					pageImage,
+					passage: passage ?? undefined
+				});
 			} catch (error) {
 				if (passage) askRequest.set(passage);
 				sendError = error instanceof ChatError ? error.message : String(error);
@@ -420,6 +428,7 @@
 					bind:this={composer}
 					bind:wholePaper
 					bind:attachPage
+					bind:webSearch
 					placeholder={pendingAsk ? 'Ask about this passage…' : pendingAdd ? 'Ask about the added passage…' : 'Ask a follow-up…'}
 					{blockedReason}
 					{busy}

@@ -40,6 +40,22 @@
 			<ChatMarkdown source={message.content} />
 			{#if message.status === 'streaming'}<span class="stream-caret" aria-hidden="true"></span>{/if}
 		{/if}
+		{#if message.sources?.length}
+			<details class="mt-2 text-xs text-slate dark:text-gray-400" data-testid="chat-message-sources">
+				<summary class="cursor-pointer select-none">
+					Searched the web · {message.sources.length} source{message.sources.length === 1 ? '' : 's'}
+				</summary>
+				<ul class="mt-1 space-y-0.5 pl-3">
+					{#each message.sources as source (source.url)}
+						<li class="truncate">
+							<a href={source.url} target="_blank" rel="noopener noreferrer" class="text-sage hover:underline" title={source.url}>
+								{source.title}
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</details>
+		{/if}
 	</div>
 {/if}
 

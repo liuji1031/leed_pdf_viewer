@@ -48,10 +48,32 @@ export interface Usage {
 	completionTokens: number;
 }
 
+/** A web page the model's search returned, from OpenRouter's `url_citation` annotations. */
+export interface WebSource {
+	url: string;
+	title: string;
+}
+
 export type StreamEvent =
 	| { type: 'delta'; text: string }
-	/** `model` is the one that actually answered, as reported by OpenRouter. */
-	| { type: 'done'; usage?: Usage; model?: string };
+	/** Text streamed so far was the model narrating a web search, not the answer: drop it. */
+	| { type: 'restart' }
+	/**
+	 * `model` is the one that actually answered, as reported by OpenRouter;
+	 * `sources` the pages a web search returned, when one ran.
+	 */
+	| { type: 'done'; usage?: Usage; model?: string; sources?: WebSource[] };
+
+/**
+ * OpenRouter's web search server tool: the model decides whether to search
+ * and writes its own queries. Capped at two searches of three results each —
+ * uncapped, one question ran five searches and cost ~6 cents.
+ */
+export const WEB_SEARCH_TOOL = {
+	type: 'openrouter:web_search',
+	parameters: { max_results: 3, max_total_results: 6 }
+} as const;
+export const WEB_SEARCH_MAX_CALLS = 2;
 
 export interface StreamRequest {
 	/** Defaults to the app's relay. */
@@ -70,6 +92,8 @@ export interface StreamRequest {
 	 * Unset leaves the model's default.
 	 */
 	reasoning?: 'minimal' | 'off';
+	/** Let the model search the web (costs extra per search). */
+	webSearch?: boolean;
 	/** Injectable for tests. */
 	fetchImpl?: typeof fetch;
 }
@@ -149,7 +173,9 @@ export async function* streamChat(req: StreamRequest): AsyncGenerator<StreamEven
 				...(req.maxTokens !== undefined && { max_tokens: req.maxTokens }),
 				...(req.temperature !== undefined && { temperature: req.temperature }),
 				...(req.reasoning === 'minimal' && { reasoning: { effort: 'minimal' } }),
-				...(req.reasoning === 'off' && { reasoning: { enabled: false } })
+				...(req.reasoning === 'off' && { reasoning: { enabled: false } }),
+				// max_uses is only honoured by native search; max_tool_calls caps every engine.
+				...(req.webSearch && { tools: [WEB_SEARCH_TOOL], max_tool_calls: WEB_SEARCH_MAX_CALLS })
 			}),
 			signal: req.signal
 		});
@@ -167,6 +193,12 @@ export async function* streamChat(req: StreamRequest): AsyncGenerator<StreamEven
 	let usage: Usage | undefined;
 	let model: string | undefined;
 	let finished = false;
+	const sources = new Map<string, WebSource>();
+	// the stream carries no marker for a search, but the model reasons again
+	// after one: reasoning that follows answer text means that text came before
+	// a search ("Let me look that up…") and the real answer is still to come.
+	let sawText = false;
+	let restart = false;
 
 	const handle = (payload: string): string | null => {
 		if (payload === '[DONE]') {
@@ -193,8 +225,20 @@ export async function* streamChat(req: StreamRequest): AsyncGenerator<StreamEven
 		if (choice?.finish_reason === 'error') {
 			throw new OpenRouterError('provider', 'The model provider failed mid-answer');
 		}
+		for (const a of choice?.delta?.annotations ?? []) {
+			const cite = a?.type === 'url_citation' ? a.url_citation : null;
+			if (typeof cite?.url === 'string' && !sources.has(cite.url)) {
+				sources.set(cite.url, { url: cite.url, title: typeof cite.title === 'string' && cite.title ? cite.title : cite.url });
+			}
+		}
+		if (req.webSearch && sawText && typeof choice?.delta?.reasoning === 'string' && choice.delta.reasoning) {
+			sawText = false;
+			restart = true;
+		}
 		const text = choice?.delta?.content;
-		return typeof text === 'string' && text.length > 0 ? text : null;
+		if (typeof text !== 'string' || text.length === 0) return null;
+		sawText = true;
+		return text;
 	};
 
 	try {
@@ -211,6 +255,10 @@ export async function* streamChat(req: StreamRequest): AsyncGenerator<StreamEven
 				: parser.push(decoder.decode(chunk.value, { stream: true }));
 			for (const payload of payloads) {
 				const text = handle(payload);
+				if (restart) {
+					restart = false;
+					yield { type: 'restart' };
+				}
 				if (text) yield { type: 'delta', text };
 				if (finished) break;
 			}
@@ -225,7 +273,7 @@ export async function* streamChat(req: StreamRequest): AsyncGenerator<StreamEven
 		if (req.signal?.aborted) throw new OpenRouterError('aborted', 'Request cancelled');
 		throw new OpenRouterError('truncated', 'The answer was cut off before it finished');
 	}
-	yield { type: 'done', usage, ...(model && { model }) };
+	yield { type: 'done', usage, ...(model && { model }), ...(sources.size > 0 && { sources: [...sources.values()] }) };
 }
 
 export interface RelayStatus {

@@ -109,6 +109,8 @@ export interface ChatMessage {
 	usage?: { promptTokens: number; completionTokens: number };
 	/** Another passage the user added to the conversation with this question. */
 	passage?: AddedPassage;
+	/** Pages a web search returned while answering. */
+	sources?: { url: string; title: string }[];
 }
 
 export interface AddedPassage {

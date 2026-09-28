@@ -199,6 +199,23 @@ describe('follow-up questions', () => {
 		expect(later.at(-1)).toBe('And then?');
 	});
 
+	it('asks for web search with its prompt and keeps the sources it found', async () => {
+		const requests: StreamRequest[] = [];
+		const stream = async function* (req: StreamRequest): AsyncGenerator<StreamEvent> {
+			requests.push(req);
+			yield { type: 'delta', text: 'Let me search.' };
+			yield { type: 'restart' };
+			yield { type: 'delta', text: 'IR-WM builds on it.' };
+			yield { type: 'done', sources: [{ url: 'https://arxiv.org/abs/2510.16729', title: 'IR-WM' }] };
+		};
+		const id = await controller(stream).startConversation(selection, 'What came later?', { webSearch: true });
+		expect(requests[0].webSearch).toBe(true);
+		expect(String(requests[0].messages[0].content)).toContain('Web search is available');
+		const [, answer] = await storage.listMessages(id);
+		expect(answer.content).toBe('IR-WM builds on it.');
+		expect(answer.sources).toEqual([{ url: 'https://arxiv.org/abs/2510.16729', title: 'IR-WM' }]);
+	});
+
 	it("leaves the model, key and endpoint to the server's relay", async () => {
 		const { stream, requests } = scriptedStream([{ chunks: ['a'] }]);
 		await controller(stream).startConversation(selection, 'q');

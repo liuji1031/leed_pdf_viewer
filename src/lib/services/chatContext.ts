@@ -28,6 +28,17 @@ export const SYSTEM_PROMPT =
 	'"why it matters" unless the user asks for them. Be concrete. Use LaTeX for math ' +
 	'($…$ inline, $$…$$ display).';
 
+/**
+ * Added to the system message when web search is on. Without it the model
+ * narrates its searches ("Now let me search for…") into the answer.
+ */
+export const WEB_SEARCH_PROMPT =
+	'Web search is available. Use it only for what the paper cannot answer — later or related ' +
+	'work, details of cited works, current information — and at most twice. If you search, ' +
+	'search before writing anything: never write text before or between searches, and never ' +
+	'describe your searching. Write only the final answer, citing each web source inline as a ' +
+	'markdown link, and keep what comes from the paper distinct from what comes from the web.';
+
 export const BUDGET = {
 	skeleton: 4800,
 	abstract: 1800,
@@ -371,6 +382,8 @@ export interface MessagesInput {
 	/** A passage added with this question. */
 	passage?: TurnPassage;
 	wholePaper?: boolean;
+	/** The model may search the web for this question. */
+	webSearch?: boolean;
 	/** data: URL of the rendered page, for multimodal models. */
 	pageImage?: string;
 	/** Most recent turns kept besides the pinned first question. */
@@ -379,7 +392,7 @@ export interface MessagesInput {
 
 export function buildMessages(input: MessagesInput): OpenRouterMessage[] {
 	const { doc, session, history, question } = input;
-	let system = `${SYSTEM_PROMPT}\n\n${buildSkeleton(doc, session.focusBlockIdx ?? undefined)}`;
+	let system = `${SYSTEM_PROMPT}${input.webSearch ? ` ${WEB_SEARCH_PROMPT}` : ''}\n\n${buildSkeleton(doc, session.focusBlockIdx ?? undefined)}`;
 	if (input.wholePaper) system += `\n\n<full_text>\n${documentMarkdown(doc)}\n</full_text>`;
 
 	const opening = (q: string) => `${session.snapshot}\n\n<selection>${session.quotedText}</selection>\n\n${q}`;
