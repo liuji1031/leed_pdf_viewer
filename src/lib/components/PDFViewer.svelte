@@ -1631,11 +1631,13 @@
 			const factor = Math.pow(0.999, zoomDelta);
 			wheelAccumulatedScale = Math.max(0.1, Math.min(10, prevScale * factor));
 
-			// Cursor-anchored pan: keep the document point under the cursor fixed.
+			// Vertically, keep the document row under the cursor fixed; horizontally,
+			// keep the page's own center fixed, so the pan's x is left as it is.
+			// The wrapper scales around its center (CSS transform-origin default)
+			// and the page is laid out centered in it, so the cursor is measured
+			// from the container's center, as in computePinchPan.
 			const rect = containerDiv.getBoundingClientRect();
-			const cursorX = event.clientX - rect.left;
-			const cursorY = event.clientY - rect.top;
-			wheelCurrentPanX = cursorX - (cursorX - wheelCurrentPanX) * (wheelAccumulatedScale / prevScale);
+			const cursorY = event.clientY - rect.top - rect.height / 2;
 			wheelCurrentPanY = cursorY - (cursorY - wheelCurrentPanY) * (wheelAccumulatedScale / prevScale);
 
 			// Apply visual scale immediately — no reactive writes so Svelte won't
