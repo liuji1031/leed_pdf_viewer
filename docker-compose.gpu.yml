@@ -20,6 +20,13 @@ services:
       # 8 (75%) works on a 6 GB card; 10 (60%) leaves no room for the KV cache.
       # Leave unset on larger GPUs.
       MINERU_VIRTUAL_VRAM_SIZE:
+      # vLLM leaves the pipeline models little room on a small card, and a
+      # formula-heavy paper then runs out of memory in formula recognition
+      # (16 × this many crops per batch). 1 fits a 6 GB card; upstream uses 2.
+      MINERU_BATCH_RATIO: ${MINERU_BATCH_RATIO:-1}
+      # lets PyTorch reuse memory it reserved but freed, instead of failing
+      # an allocation that only fragmentation stands in the way of.
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
       # FlashInfer's sampler JIT-compiles with nvcc, which the pip CUDA wheels
       # don't ship; vLLM's PyTorch sampler needs no compiler.
       VLLM_USE_FLASHINFER_SAMPLER: "0"

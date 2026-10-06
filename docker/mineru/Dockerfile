@@ -10,6 +10,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir "mineru${EXTRAS:+[$EXTRAS]}${MINERU_VERSION}"
+# Upstream hard-codes the pipeline's batch multiplier (formula recognition runs
+# 16 × BATCH_RATIO crops at once), which overruns a small GPU sharing memory
+# with vLLM. Read it from MINERU_BATCH_RATIO instead, upstream's 2 by default;
+# the build fails if upstream moves the constant.
+RUN f="$(python -c 'import mineru.backend.analysis.pdf.constants as c; print(c.__file__)')" \
+    && grep -q '^BATCH_RATIO = 2$' "$f" \
+    && sed -i 's/^BATCH_RATIO = 2$/BATCH_RATIO = int(__import__("os").environ.get("MINERU_BATCH_RATIO") or 2)/' "$f"
 # vLLM's Triton kernels are compiled at engine start-up, so the model-based
 # extras need a C toolchain; the flash-only image doesn't.
 RUN if [ -n "$EXTRAS" ]; then \
