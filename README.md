@@ -194,6 +194,7 @@ Configuration lives in `.env` — copy `.env.docker.example`. Notes:
 - The bundled CPU parser serves MinerU's fast `flash` tier; the GPU override serves `standard` (better equations and layout).
 - `PUBLIC_*` values are compiled into the client, so they are build arguments: rebuild after changing them.
 - Containers run as uid 1000 so files they write into the checkout stay yours.
+- Other devices on the same network open the app at `http://leed-pdf-viewer.local:5173` (dev) or `:3000` (prod). The `mdns` service publishes that name through the host's Avahi daemon, so it needs a Linux host with `avahi-daemon` running; `MDNS_NAME` changes the name. Everyone on the network shares the same paper database and chats. It is plain HTTP, so keep it to a network you trust.
 - The Tauri desktop app is not built in Docker; parsing needs the server relay, so it is web-only for now.
 
 ### Building the Tauri Desktop App

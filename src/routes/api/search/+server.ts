@@ -36,6 +36,15 @@ function isAllowedOrigin(origin: string): boolean {
 	}
 }
 
+function isSameHost(origin: string, host: string | null): boolean {
+	if (!host) return false;
+	try {
+		return new URL(origin).host.toLowerCase() === host.toLowerCase();
+	} catch {
+		return false;
+	}
+}
+
 // Helper function to create consistent CORS headers
 function makeCorsHeaders(origin: string): Record<string, string> {
 	return {
@@ -55,6 +64,12 @@ function validateOriginAndGetCorsHeaders(request: Request): {
 
 	// Same-origin request (no origin header) - always allowed
 	if (!origin) {
+		return { valid: true };
+	}
+
+	// Browsers send Origin on POSTs to their own server too, under whatever
+	// name it was opened by (localhost, a LAN address, leed-pdf-viewer.local).
+	if (isSameHost(origin, request.headers.get('host'))) {
 		return { valid: true };
 	}
 

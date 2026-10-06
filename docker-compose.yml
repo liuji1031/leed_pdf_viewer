@@ -40,7 +40,8 @@ x-source-mount: &source-mount
 
 services:
   # ---------------------------------------------------------------------
-  # Vite dev server with HMR.  http://localhost:5173
+  # Vite dev server with HMR.  http://localhost:5173, and from other devices
+  # on the network http://leed-pdf-viewer.local:5173 (see `mdns`).
   # ---------------------------------------------------------------------
   dev:
     profiles: [dev]
@@ -49,9 +50,10 @@ services:
       target: dev
     environment:
       <<: [*public-env, *openrouter-env, *paper-db-env]
-      # Host-side address the browser connects back to for HMR. Must be the
-      # host's value, not the container's, or the websocket never connects.
-      VITE_HMR_HOST: ${VITE_HMR_HOST:-localhost}
+      # Host-side address the browser connects back to for HMR. Empty means
+      # the address the page was loaded from, which works from any device;
+      # if set, it must be the host's value, not the container's.
+      VITE_HMR_HOST: ${VITE_HMR_HOST:-}
       VITE_HMR_PORT: ${VITE_HMR_PORT:-5173}
       VITE_DEV_MODE: "true"
       # The app reaches MinerU through its own /api/mineru route (browsers
@@ -83,7 +85,30 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------
-  # Production: the adapter-node build. http://localhost:3000
+  # Names this machine leed-pdf-viewer.local on the local network, so other
+  # devices on the same Wi-Fi reach the app at leed-pdf-viewer.local:<port>.
+  # Publishes through the host's Avahi daemon (Linux hosts; needs
+  # avahi-daemon running), so it shares the host's network and D-Bus.
+  # MDNS_NAME picks another name.
+  # ---------------------------------------------------------------------
+  mdns:
+    profiles: [dev, prod]
+    build:
+      context: docker/mdns
+    network_mode: host
+    environment:
+      MDNS_NAME: ${MDNS_NAME:-leed-pdf-viewer.local}
+    volumes:
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+    # Docker's default AppArmor profile has no D-Bus rules, so the host's bus
+    # refuses the container ("Access denied") on AppArmor hosts like Ubuntu.
+    security_opt:
+      - apparmor=unconfined
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # Production: the adapter-node build. http://localhost:3000, and
+  # http://leed-pdf-viewer.local:3000 from other devices (see `mdns`).
   #   docker compose --profile prod up -d --build
   # PUBLIC_* are build args (inlined at build time); see .env.docker.example.
   # ---------------------------------------------------------------------
@@ -100,7 +125,7 @@ services:
       <<: [*openrouter-env, *paper-db-env]
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
       # adapter-node needs the public origin for form actions / CSRF checks.
-      ORIGIN: ${ORIGIN:-http://localhost:3000}
+      ORIGIN: ${ORIGIN:-http://${MDNS_NAME:-leed-pdf-viewer.local}:${APP_PORT:-3000}}
       BODY_SIZE_LIMIT: ${BODY_SIZE_LIMIT:-110M}
     volumes:
       - *paper-db-mount
