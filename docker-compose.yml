@@ -70,6 +70,10 @@ services:
       mineru:
         condition: service_healthy
         required: false
+      # so `up dev` alone also publishes leed-pdf-viewer.local.
+      mdns:
+        condition: service_started
+        required: false
 
   # ---------------------------------------------------------------------
   # MinerU document parser (CPU, `flash` tier). Not published to the host:
@@ -134,6 +138,9 @@ services:
     depends_on:
       mineru:
         condition: service_healthy
+        required: false
+      mdns:
+        condition: service_started
         required: false
     restart: unless-stopped
 
