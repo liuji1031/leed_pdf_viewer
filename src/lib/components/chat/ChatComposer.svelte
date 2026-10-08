@@ -93,9 +93,9 @@
 				<input type="checkbox" bind:checked={attachPage} class="rounded text-sage focus:ring-sage" data-testid="chat-attach-page" />
 				Page image
 			</label>
-			<label class="flex items-center gap-1.5" title="Let the model search the web, for things the paper doesn't cover — about 1–5¢ extra per question">
+			<label class="flex items-center gap-1.5" title="The model searches the web only when a question goes beyond the paper, such as a cited paper or later work — about 1–5¢ extra when it does. Untick to answer from the paper alone.">
 				<input type="checkbox" bind:checked={webSearch} class="rounded text-sage focus:ring-sage" data-testid="chat-web-search" />
-				Web search
+				Web search (auto)
 			</label>
 		</span>
 		{#if blockedReason}

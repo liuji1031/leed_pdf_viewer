@@ -16,6 +16,12 @@ describe('parseChatSettings', () => {
 		expect(parseChatSettings('{oops')).toEqual(DEFAULT_CHAT_SETTINGS);
 	});
 
+	it('offers web search by default and remembers turning it off', () => {
+		expect(DEFAULT_CHAT_SETTINGS.webSearch).toBe(true);
+		expect(parseChatSettings(JSON.stringify({ webSearch: false })).webSearch).toBe(false);
+		expect(parseChatSettings(JSON.stringify({ webSearch: 'no' })).webSearch).toBe(true);
+	});
+
 	it('merges stored values over the defaults', () => {
 		const parsed = parseChatSettings(JSON.stringify({ parserTier: 'standard', summaryIdleMs: 120_000 }));
 		expect(parsed).toEqual({ ...DEFAULT_CHAT_SETTINGS, parserTier: 'standard', summaryIdleMs: 120_000 });

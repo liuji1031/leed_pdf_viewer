@@ -24,6 +24,7 @@
 		clampPanelWidth
 	} from '$lib/stores/chatPanelStore';
 	import { openRouterStatus, refreshOpenRouterStatus } from '$lib/stores/openRouterStatusStore';
+	import { chatSettings } from '$lib/stores/chatSettingsStore';
 	import {
 		activeSessionId,
 		askRequest,
@@ -60,7 +61,7 @@
 	let sendError: string | null = null;
 	let wholePaper = false;
 	let attachPage = false;
-	let webSearch = false;
+	$: webSearch = $chatSettings.webSearch;
 
 	$: activeSession = $chatSessions.find((s) => s.id === $activeSessionId) ?? null;
 	$: messages = activeSession ? ($chatMessages.get(activeSession.id) ?? []) : [];
@@ -159,7 +160,7 @@
 			});
 			const chars = built.reduce((n, m) => n + (typeof m.content === 'string' ? m.content.length : 0), 0);
 			const tokens = Math.ceil(chars / 4);
-			return `≈${tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : tokens} tokens sent${web ? ' + web results' : ''}`;
+			return `≈${tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : tokens} tokens sent${web ? ' + web results if searched' : ''}`;
 		} catch {
 			return '';
 		}
@@ -428,7 +429,7 @@
 					bind:this={composer}
 					bind:wholePaper
 					bind:attachPage
-					bind:webSearch
+					bind:webSearch={$chatSettings.webSearch}
 					placeholder={pendingAsk ? 'Ask about this passage…' : pendingAdd ? 'Ask about the added passage…' : 'Ask a follow-up…'}
 					{blockedReason}
 					{busy}

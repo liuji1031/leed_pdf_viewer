@@ -17,6 +17,8 @@ export interface ChatSettings {
 	parserTier: 'auto' | 'flash' | 'basic' | 'standard' | 'advanced';
 	/** Start parsing as soon as a document is opened. */
 	autoParse: boolean;
+	/** Offer the model web search; it decides per question whether to use it. */
+	webSearch: boolean;
 }
 
 const PARSER_TIERS = ['auto', 'flash', 'basic', 'standard', 'advanced'];
@@ -29,7 +31,8 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
 	parserEndpoint: '/api/mineru',
 	parserApiKey: '',
 	parserTier: 'auto',
-	autoParse: true
+	autoParse: true,
+	webSearch: true
 };
 
 /**
@@ -50,7 +53,8 @@ export function parseChatSettings(raw: string | null): ChatSettings {
 			parserEndpoint: pick('parserEndpoint', (v) => isString(v) && (v as string).trim() !== ''),
 			parserApiKey: pick('parserApiKey', isString),
 			parserTier: pick('parserTier', (v) => PARSER_TIERS.includes(v as string)),
-			autoParse: pick('autoParse', (v) => typeof v === 'boolean')
+			autoParse: pick('autoParse', (v) => typeof v === 'boolean'),
+			webSearch: pick('webSearch', (v) => typeof v === 'boolean')
 		};
 	} catch {
 		return { ...DEFAULT_CHAT_SETTINGS };

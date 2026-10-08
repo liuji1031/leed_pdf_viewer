@@ -33,11 +33,15 @@ export const SYSTEM_PROMPT =
  * narrates its searches ("Now let me search for…") into the answer.
  */
 export const WEB_SEARCH_PROMPT =
-	'Web search is available. Use it only for what the paper cannot answer — later or related ' +
-	'work, details of cited works, current information — and at most twice. If you search, ' +
-	'search before writing anything: never write text before or between searches, and never ' +
-	'describe your searching. Write only the final answer, citing each web source inline as a ' +
-	'markdown link, and keep what comes from the paper distinct from what comes from the web.';
+	'Web search is available; decide for each question whether it is needed, and search at ' +
+	'most twice. Search when the answer needs information this paper does not contain: what a ' +
+	'paper it cites proposes, does or found (look it up by its title from the references), ' +
+	"the authors' other work, later or related work, methods the paper names but does not " +
+	'describe, or current facts. Do not search when the paper itself answers the question, such ' +
+	'as explaining its own passages, equations, figures or terms. If you search, search before ' +
+	'writing anything: never write text before or between searches, and never describe your ' +
+	'searching. Write only the final answer, citing each web source inline as a markdown link, ' +
+	'and keep what comes from the paper distinct from what comes from the web.';
 
 export const BUDGET = {
 	skeleton: 4800,
