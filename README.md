@@ -195,6 +195,7 @@ Configuration lives in `.env` — copy `.env.docker.example`. Notes:
 - `PUBLIC_*` values are compiled into the client, so they are build arguments: rebuild after changing them.
 - Containers run as uid 1000 so files they write into the checkout stay yours.
 - Other devices on the same network open the app at `http://leed-pdf-viewer.local:5173` (dev) or `:3000` (prod). The `mdns` service publishes that name through the host's Avahi daemon, so it needs a Linux host with `avahi-daemon` running; `MDNS_NAME` changes the name. Everyone on the network shares the same paper database and chats. It is plain HTTP, so keep it to a network you trust.
+- The `litestream` service continuously backs up the paper database to `PAPER_BACKUP_DIR` (for example a Dropbox folder), with point-in-time restore up to 30 days back. Keep `PAPER_DATA_DIR` itself on a local disk. To restore, run `docker compose stop dev app litestream`, then `docker compose run --rm --no-deps litestream restore -force -o /data/leedpdf.db /data/leedpdf.db` (add `-timestamp <RFC 3339 time>` for an earlier state).
 - The Tauri desktop app is not built in Docker; parsing needs the server relay, so it is web-only for now.
 
 ### Building the Tauri Desktop App

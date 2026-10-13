@@ -1,0 +1,13 @@
+# Litestream: continuous backup of the paper database (see the `litestream`
+# service in docker-compose.yml). Each committed change is copied to /backup
+# within seconds, in order, so the backup always restores to a consistent
+# recent state; a full snapshot is taken daily and kept for 30 days, which is
+# how far back a point-in-time restore can go.
+snapshot:
+  interval: 24h
+  retention: 720h
+
+dbs:
+  - path: /data/leedpdf.db
+    replica:
+      url: file:///backup/leedpdf

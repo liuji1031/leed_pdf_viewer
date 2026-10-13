@@ -71,3 +71,5 @@ test-results/
 # paper database (PAPER_DATA_DIR); the directory is kept so docker never creates it as root
 /data/*
 !/data/.gitkeep
+# its default litestream backup (PAPER_BACKUP_DIR)
+/data-backup/

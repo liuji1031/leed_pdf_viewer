@@ -70,8 +70,11 @@ services:
       mineru:
         condition: service_healthy
         required: false
-      # so `up dev` alone also publishes leed-pdf-viewer.local.
+      # so `up dev` alone also publishes leed-pdf-viewer.local and backs up the database.
       mdns:
+        condition: service_started
+        required: false
+      litestream:
         condition: service_started
         required: false
 
@@ -86,6 +89,28 @@ services:
       context: docker/mineru
     volumes:
       - mineru-models:/models
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # Continuous backup of the paper database to PAPER_BACKUP_DIR (e.g. a
+  # Dropbox folder). The live database stays in PAPER_DATA_DIR; only finished
+  # backup files land in the backup folder, so a sync client never sees a
+  # half-written database. Restore, overwriting the current database:
+  #   docker compose stop dev app litestream
+  #   docker compose run --rm --no-deps litestream restore -force -o /data/leedpdf.db /data/leedpdf.db
+  # Add -timestamp 2026-10-01T12:00:00Z for a point in time (up to 30 days
+  # back; see docker/litestream.yml). The folder must exist and be owned by
+  # uid 1000 before the first start.
+  # ---------------------------------------------------------------------
+  litestream:
+    profiles: [dev, prod]
+    image: litestream/litestream:0.5.17
+    user: "1000:1000"
+    command: ["replicate"]
+    volumes:
+      - *paper-db-mount
+      - ${PAPER_BACKUP_DIR:-./data-backup}:/backup
+      - ./docker/litestream.yml:/etc/litestream.yml:ro
     restart: unless-stopped
 
   # ---------------------------------------------------------------------
@@ -140,6 +165,9 @@ services:
         condition: service_healthy
         required: false
       mdns:
+        condition: service_started
+        required: false
+      litestream:
         condition: service_started
         required: false
     restart: unless-stopped
