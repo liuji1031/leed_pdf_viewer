@@ -3,11 +3,11 @@ import { askRequest } from './chatStore';
 import { drawingState } from './drawingStore';
 
 /**
- * Chat panel layout state. The width is remembered per browser; whether the
- * panel is open follows the ask tool: it opens when the tool is chosen and
- * closes when another tool is.
+ * Chat panel layout state, remembered per browser. The panel starts open,
+ * stays open across tool changes, and opens when the ask tool is chosen.
  */
 
+const OPEN_KEY = 'leedpdf_chat_panel_open';
 const WIDTH_KEY = 'leedpdf_chat_panel_width';
 
 export const CHAT_PANEL_MIN_WIDTH = 300;
@@ -40,23 +40,26 @@ function stored<T>(key: string, fallback: T, parse: (raw: string) => T | undefin
 	return store;
 }
 
-export const chatPanelOpen = writable(false);
+export const chatPanelOpen = stored(OPEN_KEY, true, (raw) =>
+	raw === 'true' ? true : raw === 'false' ? false : undefined
+);
 export const chatPanelWidth = stored(WIDTH_KEY, CHAT_PANEL_DEFAULT_WIDTH, (raw) => {
 	const n = Number(raw);
 	return Number.isFinite(n) && n > 0 ? n : undefined;
 });
 export const chatSettingsOpen = writable(false);
 
-// only a change of tool opens or closes the panel, so other drawing-state
+export function toggleChatPanel() {
+	chatPanelOpen.update((open) => !open);
+}
+
+// only switching to the ask tool opens the panel, so other drawing-state
 // updates (color, line width) leave it as the user left it.
 let lastTool: string | undefined;
 drawingState.subscribe(({ tool }) => {
 	if (tool === lastTool) return;
-	const entering = tool === 'ask';
-	const leaving = lastTool === 'ask';
 	lastTool = tool;
-	if (entering) chatPanelOpen.set(true);
-	else if (leaving) chatPanelOpen.set(false);
+	if (tool === 'ask') chatPanelOpen.set(true);
 });
 
 // clicking "Ask" on a selection opens the panel on that question.

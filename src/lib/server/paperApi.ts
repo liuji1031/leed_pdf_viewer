@@ -1,4 +1,4 @@
-import type { AnnotationPages, PaperImport, PaperStore } from './paperStore';
+import type { AnnotationPages, PaperImport, PaperStore, RecentEntry } from './paperStore';
 
 /**
  * HTTP interface to the paper store, served at /api/papers/*.
@@ -84,10 +84,28 @@ function parseImport(raw: Record<string, unknown>): PaperImport {
 	return { documents, sessions, messages, annotations } as unknown as PaperImport;
 }
 
+/** Only what the recent list shows and needs to reopen the PDF is kept. */
+function parseRecentEntry(raw: Record<string, unknown>): RecentEntry {
+	requireFields(raw, 'A recent PDF', ['pdfKey', 'name'], ['size']);
+	const entry: RecentEntry = { pdfKey: raw.pdfKey as string, name: raw.name as string, size: raw.size as number };
+	if (raw.url !== undefined) {
+		if (!isKey(raw.url) || !/^https?:\/\//i.test(raw.url)) throw new BadRequest('A recent PDF\'s "url" must be http(s).');
+		entry.url = raw.url;
+	}
+	if (typeof raw.title === 'string' && raw.title.trim()) entry.title = raw.title.trim().slice(0, 300);
+	if (Number.isInteger(raw.pageCount) && (raw.pageCount as number) > 0) entry.pageCount = raw.pageCount as number;
+	return entry;
+}
+
+/**
+ * `client` identifies the device for its recent-PDF list: the address the
+ * request came from, so each device on the network sees only what it opened.
+ */
 export async function handlePaperRequest(
 	request: Request,
 	path: string,
-	store: Promise<PaperStore> | null
+	store: Promise<PaperStore> | null,
+	client = ''
 ): Promise<Response> {
 	const url = new URL(request.url);
 	const route = `${request.method} ${path}`;
@@ -151,6 +169,15 @@ export async function handlePaperRequest(
 
 			case 'POST import':
 				return json(db.importMissing(parseImport(await body(request))));
+
+			case 'GET recent':
+				return json(db.listRecent(client));
+			case 'PUT recent':
+				db.touchRecent(client, parseRecentEntry(await body(request)));
+				return json({ ok: true });
+			case 'DELETE recent':
+				db.deleteRecent(client, param(url, 'key'));
+				return json({ ok: true });
 
 			default:
 				return errorResponse(404, 'route_not_allowed', 'Not a paper storage route.');

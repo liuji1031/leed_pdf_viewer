@@ -30,7 +30,8 @@
 	import { handleSearchLinkClick } from '../utils/navigationUtils';
 	import { trackToolSelection } from '../utils/analytics';
 	import { goto } from '$app/navigation';
-	import { chatPanelOpen } from '$lib/stores/chatPanelStore';
+	import { chatPanelOpen, toggleChatPanel } from '$lib/stores/chatPanelStore';
+	import { recentPanelOpen, recentPdfsAvailable } from '$lib/services/recentPdfs';
 	import StampPalette from './StampPalette.svelte';
 	import Tooltip from '$lib/components/Tooltip.svelte';
 	import {
@@ -45,10 +46,12 @@
 		FileText,
 		Folder,
 		Highlighter,
+		History,
 		Image,
 		Layout,
 		Maximize2,
 		MessageSquareQuote,
+		MessagesSquare,
 		Minimize2,
 		Moon,
 		MoreHorizontal,
@@ -340,6 +343,21 @@
 							<Layout size={14} />
 						</button>
 					</Tooltip>
+
+					{#if $recentPdfsAvailable}
+						<Tooltip content="Recent PDFs">
+							<button
+								class="tool-button w-8 h-8 flex items-center justify-center"
+								class:active={$recentPanelOpen}
+								on:click={() => recentPanelOpen.update((open) => !open)}
+								aria-label="Toggle recent PDFs"
+								aria-pressed={$recentPanelOpen}
+								data-testid="recent-pdfs-toggle"
+							>
+								<History size={14} />
+							</button>
+						</Tooltip>
+					{/if}
 				</div>
 
 				<!-- Desktop: Zoom Controls -->
@@ -627,6 +645,19 @@
 						aria-label="Ask about text tool"
 					>
 						<MessageSquareQuote size={14} />
+					</button>
+				</Tooltip>
+
+				<Tooltip content="Paper chat (C)">
+					<button
+						class="tool-button w-8 h-8 flex items-center justify-center"
+						class:active={$chatPanelOpen}
+						on:click={toggleChatPanel}
+						aria-label="Toggle paper chat"
+						aria-pressed={$chatPanelOpen}
+						data-testid="chat-panel-toggle"
+					>
+						<MessagesSquare size={14} />
 					</button>
 				</Tooltip>
 
@@ -1510,6 +1541,16 @@
 				aria-label="Ask about text tool"
 			>
 				<MessageSquareQuote size={16} />
+			</button>
+
+			<button
+				class="tool-button flex items-center justify-center"
+				class:active={$chatPanelOpen}
+				on:click={toggleChatPanel}
+				aria-label="Toggle paper chat"
+				aria-pressed={$chatPanelOpen}
+			>
+				<MessagesSquare size={16} />
 			</button>
 
 			<div class="h-6 w-px bg-charcoal/20"></div>

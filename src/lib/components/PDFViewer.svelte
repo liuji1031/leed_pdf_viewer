@@ -48,6 +48,9 @@
 	import ChatHighlightOverlay from './ChatHighlightOverlay.svelte';
 	// Parses each opened document in the background for the chat assistant.
 	import '$lib/services/documentParsing';
+	import { activePDFKey } from '../stores/drawingStore';
+	import { recentEntryFor, recordOpenedPdf } from '$lib/services/recentPdfs';
+	import { get } from 'svelte/store';
 	import TextSelectionOverlay from './TextSelectionOverlay.svelte';
 	import { TOOLBAR_HEIGHT } from '$lib/constants';
 	import { setWindowTitle } from '$lib/utils/tauriUtils';
@@ -517,6 +520,7 @@
 			}
 			console.log('PDF loaded successfully, pages:', document.numPages);
 
+			let pdfTitleForRecent: string | undefined;
 			// Extract PDF title and update webpage title
 			try {
 				console.log('Attempting to extract PDF metadata...');
@@ -524,6 +528,7 @@
 				console.log('PDF metadata extracted:', metadata);
 
 				const pdfTitle = (metadata.info as any)?.Title;
+				pdfTitleForRecent = typeof pdfTitle === 'string' ? pdfTitle : undefined;
 				console.log('PDF Title from metadata:', pdfTitle);
 
 				if (isValidTitle(pdfTitle)) {
@@ -574,6 +579,15 @@
 
 			// Mark this file as loaded
 			lastLoadedFile = pdfFile;
+
+			const openedKey = get(activePDFKey);
+			const recent = openedKey
+				? recentEntryFor(pdfFile, openedKey, {
+						title: isValidTitle(pdfTitleForRecent) ? pdfTitleForRecent!.trim() : undefined,
+						pageCount: document.numPages
+					})
+				: null;
+			if (recent && !viewOnlyMode) void recordOpenedPdf(recent);
 
 			// Reset pan offset to center the PDF
 			panOffset = { x: 0, y: 0 };

@@ -2,10 +2,10 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ParsedDocument } from '$lib/services/docParser/types';
-import type { AnnotationPages, PaperImport } from '$lib/services/paperApi';
+import type { AnnotationPages, PaperImport, RecentEntry, RecentPdf } from '$lib/services/paperApi';
 import type { ChatMessage, ChatSession } from '$lib/utils/chatStorage';
 
-export type { AnnotationPages, PaperImport };
+export type { AnnotationPages, PaperImport, RecentEntry, RecentPdf };
 
 /**
  * Server-side storage for everything the app keeps per paper: the parsed
@@ -39,6 +39,12 @@ export interface PaperStore {
 
 	/** Adds what isn't stored yet; existing rows always win. */
 	importMissing(data: PaperImport): { added: number };
+
+	/** One client's opened PDFs, most recently opened first. */
+	listRecent(client: string): RecentPdf[];
+	/** Records an open: adds the PDF or moves it to the top. */
+	touchRecent(client: string, entry: RecentEntry): void;
+	deleteRecent(client: string, pdfKey: string): void;
 	close(): void;
 }
 
@@ -71,6 +77,14 @@ const SCHEMA = `
 		updated_at INTEGER NOT NULL,
 		PRIMARY KEY (pdf_key, kind)
 	);
+	CREATE TABLE IF NOT EXISTS recent_pdfs (
+		client TEXT NOT NULL,
+		pdf_key TEXT NOT NULL,
+		data TEXT NOT NULL,
+		opened_at INTEGER NOT NULL,
+		PRIMARY KEY (client, pdf_key)
+	);
+	CREATE INDEX IF NOT EXISTS recent_by_client ON recent_pdfs (client, opened_at);
 `;
 
 export function createPaperStore(db: DatabaseSync, now: () => number = Date.now): PaperStore {
@@ -113,7 +127,14 @@ export function createPaperStore(db: DatabaseSync, now: () => number = Date.now)
 			`INSERT INTO annotations (pdf_key, kind, data, updated_at) VALUES (?, ?, ?, ?)
 			 ON CONFLICT (pdf_key, kind) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`
 		),
-		addAnnotations: db.prepare('INSERT OR IGNORE INTO annotations (pdf_key, kind, data, updated_at) VALUES (?, ?, ?, ?)')
+		addAnnotations: db.prepare('INSERT OR IGNORE INTO annotations (pdf_key, kind, data, updated_at) VALUES (?, ?, ?, ?)'),
+
+		listRecent: db.prepare('SELECT data, opened_at FROM recent_pdfs WHERE client = ? ORDER BY opened_at DESC, pdf_key'),
+		touchRecent: db.prepare(
+			`INSERT INTO recent_pdfs (client, pdf_key, data, opened_at) VALUES (?, ?, ?, ?)
+			 ON CONFLICT (client, pdf_key) DO UPDATE SET data = excluded.data, opened_at = excluded.opened_at`
+		),
+		deleteRecent: db.prepare('DELETE FROM recent_pdfs WHERE client = ? AND pdf_key = ?')
 	};
 
 	const parse = <T>(row: unknown): T => JSON.parse((row as { data: string }).data) as T;
@@ -200,6 +221,19 @@ export function createPaperStore(db: DatabaseSync, now: () => number = Date.now)
 				}
 				return { added };
 			});
+		},
+
+		listRecent(client) {
+			return (q.listRecent.all(client) as { data: string; opened_at: number }[]).map((row) => ({
+				...(JSON.parse(row.data) as RecentEntry),
+				openedAt: row.opened_at
+			}));
+		},
+		touchRecent(client, entry) {
+			q.touchRecent.run(client, entry.pdfKey, JSON.stringify(entry), now());
+		},
+		deleteRecent(client, pdfKey) {
+			q.deleteRecent.run(client, pdfKey);
 		},
 
 		close() {

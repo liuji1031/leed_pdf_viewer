@@ -8,6 +8,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import PDFViewer from '$lib/components/PDFViewer.svelte';
 	import ChatPanel from '$lib/components/chat/ChatPanel.svelte';
+	import RecentPdfsPanel from '$lib/components/RecentPdfsPanel.svelte';
 	import Toolbar from '$lib/components/Toolbar.svelte';
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 	import TemplatePicker from '$lib/components/TemplatePicker.svelte';
@@ -1086,7 +1087,9 @@
 
 	<div class="w-full h-full" class:pt-12={!focusMode && !presentationMode}>
 		{#if showWelcome}
-			<div class="h-full flex flex-col">
+			<div class="h-full flex">
+			<RecentPdfsPanel />
+			<div class="h-full flex-1 min-w-0 flex flex-col">
 				<!-- Main content, centered in remaining space -->
 				<div class="flex-1 flex items-center justify-center">
 					<div class="text-center max-w-md mx-auto px-6">
@@ -1250,8 +1253,12 @@
 					</div>
 				</div>
 			</div>
+			</div>
 		{:else}
 			<div class="flex h-full">
+				{#if !presentationMode && !focusMode}
+					<RecentPdfsPanel />
+				{/if}
 				{#if showThumbnails}
 					<PageThumbnails isVisible={showThumbnails} onPageSelect={handlePageSelect} />
 				{/if}

@@ -1,5 +1,5 @@
 import { setTool, undo, redo } from '$lib/stores/drawingStore';
-import { chatPanelOpen } from '$lib/stores/chatPanelStore';
+import { chatPanelOpen, toggleChatPanel } from '$lib/stores/chatPanelStore';
 
 export interface KeyboardShortcutsParams {
 	pdfViewer: {
@@ -134,6 +134,11 @@ export function keyboardShortcuts(node: Window | HTMLElement, params: KeyboardSh
 					event.preventDefault();
 					setTool('ask');
 					chatPanelOpen.set(true);
+					break;
+				case 'c':
+				case 'C':
+					event.preventDefault();
+					toggleChatPanel();
 					break;
 				case 'h':
 				case 'H':

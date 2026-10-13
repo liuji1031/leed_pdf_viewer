@@ -19,6 +19,22 @@ export interface PaperImport {
 	annotations?: { pdfKey: string; kind: string; data: AnnotationPages }[];
 }
 
+/** What the browser reports about a PDF it opened. */
+export interface RecentEntry {
+	pdfKey: string;
+	name: string;
+	size: number;
+	/** Where it was opened from; absent for a local file. */
+	url?: string;
+	title?: string;
+	pageCount?: number;
+}
+
+/** A PDF in this device's recently opened list. */
+export interface RecentPdf extends RecentEntry {
+	openedAt: number;
+}
+
 export class PaperApi {
 	private enabledProbe: Promise<boolean> | null = null;
 	private enabledResult: boolean | undefined;
@@ -88,6 +104,11 @@ export class PaperApi {
 		this.call<unknown>('PUT', 'annotations', { key: pdfKey, kind }, data, options.keepalive).then(() => {});
 
 	importMissing = (data: PaperImport) => this.call<{ added: number }>('POST', 'import', {}, data);
+
+	/** This device's list: the server keys it by the address the request comes from. */
+	listRecent = () => this.call<RecentPdf[]>('GET', 'recent', {});
+	touchRecent = (entry: RecentEntry) => this.call<unknown>('PUT', 'recent', {}, entry).then(() => {});
+	deleteRecent = (pdfKey: string) => this.call<unknown>('DELETE', 'recent', { key: pdfKey }).then(() => {});
 }
 
 /** Chat and parse storage on the server, with the same behaviour as the IndexedDB store. */
